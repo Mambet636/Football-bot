@@ -20,7 +20,7 @@ from aiogram.types import (
 )
 import matplotlib
 
-matplotlib.use("Agg")  # Предотвращает крах сервера при создании графиков
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -660,4 +660,5 @@ async def show_chart(message: types.Message):
     buf.seek(0)
     plt.close()
 
-    photo = BufferedInputFile(buf
+    photo = BufferedInputFile(buf.read(), filename="chart.png")
+    await message.ans
