@@ -16,7 +16,8 @@ import pandas as pd
 
 # 🔑 ТВОИ КЛЮЧИ
 BOT_TOKEN = "8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s"
-GEMINI_KEY = "AQ.Ab8RN6J0F41zfDbSpXt5OcuLQ5PDpiQIHziu7SzMkjd2qwR0-Q"
+# Вставь сюда ключ от Groq (начинается с gsk_... получить можно за секунду на console.groq.com)
+GROQ_API_KEY = "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"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -286,7 +287,7 @@ async def daily_challenge(message: types.Message):
     await message.answer(random.choice(challenges), parse_mode="Markdown")
 
 
-# --- ИИ-ТРЕНЕР (ЧЕРЕЗ ПРЯМОЙ API ЗАПРОС) ---
+# --- ИИ-ТРЕНЕР (ЧЕРЕЗ GROQ API) ---
 @dp.message(F.text == "🧠 ИИ-Тренер")
 async def ask_coach_start(message: types.Message, state: FSMContext):
     await state.set_state(CoachForm.waiting_for_question)
@@ -305,25 +306,24 @@ async def process_coach_question(message: types.Message, state: FSMContext):
         "⏳ *Тренер анализирует твой вопрос...*", parse_mode="Markdown"
     )
 
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {GEMINI_KEY}",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
-        "contents": [
+        "model": "llama3-70b-8192",
+        "messages": [
             {
-                "parts": [
-                    {
-                        "text": (
-                            "Ты опытный футбольный тренер. Отвечай емко, давай"
-                            " конкретные практические советы по технике,"
-                            f" движению, дриблингу. Вопрос игрока: {question}"
-                        )
-                    }
-                ]
-            }
-        ]
+                "role": "system",
+                "content": (
+                    "Ты опытный футбольный тренер. Отвечай емко, давай"
+                    " конкретные практические советы по технике, движению,"
+                    " дриблингу."
+                ),
+            },
+            {"role": "user", "content": question},
+        ],
     }
 
     try:
@@ -333,12 +333,7 @@ async def process_coach_question(message: types.Message, state: FSMContext):
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    ai_text = (
-                        data.get("candidates", [{}])[0]
-                        .get("content", {})
-                        .get("parts", [{}])[0]
-                        .get("text", "Пустой ответ")
-                    )
+                    ai_text = data["choices"][0]["message"]["content"]
                 else:
                     err_text = await resp.text()
                     ai_text = f"Ошибка API ({resp.status}): {err_text}"
