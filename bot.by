@@ -5,6 +5,7 @@ import logging
 import random
 import sqlite3
 
+import aiohttp
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import CommandStart
@@ -25,8 +26,9 @@ ai_model = genai.GenerativeModel("gemini-1.5-flash")
 
 logging.basicConfig(level=logging.INFO)
 
-# 🛠️ ПРОКСИ ДЛЯ БЕСПЛАТНОГО ТАРИФА PYTHONANYWHERE
-session = AiohttpSession(proxy="http://proxy.server:3128")
+# 🛠️ СТАБИЛЬНОЕ ПОДКЛЮЧЕНИЕ ПРОКСИ ДЛЯ PYTHONANYWHERE (БЕЗ 503 ОШИБОК)
+session = AiohttpSession()
+session._session = aiohttp.ClientSession(proxy="http://proxy.server:3128")
 bot = Bot(token=BOT_TOKEN, session=session)
 dp = Dispatcher()
 
