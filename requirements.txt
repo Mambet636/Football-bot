@@ -1,6 +1,3 @@
-aiogram
-google-generativeai
+aiogram==3.18.0
 pandas
 matplotlib
-aiohttp
-
