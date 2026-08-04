@@ -27,7 +27,12 @@ import pandas as pd
 # 🔑 ТОКЕН БЕРЕТСЯ АВТОМАТИЧЕСКИ ИЗ НАСТРОЕК RAILWAY (Variables)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+# Настройка логирования с мгновенным сбросом буфера, чтобы логи не висели на сервере
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -656,9 +661,4 @@ async def show_chart(message: types.Message):
     plt.tight_layout()
 
     buf = io.BytesIO()
-    plt.savefig(buf, format="png")
-    buf.seek(0)
-    plt.close()
-
-    photo = BufferedInputFile(buf.read(), filename="chart.png")
-    await message.ans
+       
