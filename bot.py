@@ -21,7 +21,7 @@ from aiogram.types import (
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# 🔑 ТОКЕН БЕРЕТСЯ АВТОМАТИЧЕСКИ ИЗ НАСТРОЕК RAILWAY (Variables)
+# 🔑 ТОКЕН БЕРЕТСЯ ИЗ НАСТРОЕК RAILWAY (Variables)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -35,7 +35,6 @@ def init_db():
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
 
-    # Таблица матчей
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS matches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +46,6 @@ def init_db():
         )
     """)
 
-    # Таблица профилей пользователей (позиция и прошлый опыт)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS profiles (
             user_id INTEGER PRIMARY KEY,
@@ -187,7 +185,7 @@ async def process_position(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# --- ДОБАВЛЕНИЕ ПРОШЛОЙ СТАТИСТИКИ (ДО БОТА) ---
+# --- ДОБАВЛЕНИЕ ПРОШЛОЙ СТАТИСТИКИ ---
 @dp.message(F.text == "📜 Добавить прошлые голы")
 async def start_past_stats(message: types.Message, state: FSMContext):
     await state.set_state(PastStatsForm.waiting_for_past_goals)
@@ -225,7 +223,7 @@ async def process_past_matches(message: types.Message, state: FSMContext):
     await state.update_data(past_matches=past_matches)
     await state.set_state(PastStatsForm.waiting_for_past_hours)
     await message.answer(
-        "⏱️ И сколько примерно часов провел на поле в прошлых матчах? (например: `40` или `50.5`):"
+        "⏱️ И сколько примерно часов провел на поле в прошлых матчах? (например: `40`):"
     )
 
 
@@ -276,14 +274,12 @@ async def process_past_hours(message: types.Message, state: FSMContext):
         f"✅ **Прошлые данные успешно сохранены!**\n\n"
         f"⚽ Прошлые голы: **{past_goals}**\n"
         f"👟 Прошлые матчи: **{past_matches}**\n"
-        f"⏱️ Прошлое время: **{past_hours:.1f} ч.**\n\n"
-        "Теперь они учитываются в твоей общей статистике и топе!",
+        f"⏱️ Прошлое время: **{past_hours:.1f} ч.**",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown",
     )
 
 
-# --- СИСТЕМА РАНГОВ ---
 def get_user_rank(total_goals):
     if total_goals >= 300:
         return "👑 Легенда поля"
@@ -299,17 +295,14 @@ def get_user_rank(total_goals):
         return "🌱 Новичок"
 
 
-# --- ПРОВЕРКА ДОСТИЖЕНИЙ ---
 def check_achievements(user_id):
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
-
     cursor.execute(
         "SELECT COUNT(*), SUM(goals), MAX(goals), SUM(hours) FROM matches WHERE user_id = ?",
         (user_id,),
     )
     match_res = cursor.fetchone()
-
     cursor.execute(
         "SELECT past_goals, past_matches, past_hours FROM profiles WHERE user_id = ?",
         (user_id,),
@@ -336,25 +329,16 @@ def check_achievements(user_id):
     total_hours = b_hours + p_hours
 
     unlocked = []
-
     if total_games >= 1:
         unlocked.append("👟 **Первый шаг** — Вход в систему")
-
     if total_goals >= 50:
         unlocked.append("🎯 **Снайпер** — Забито 50+ голов суммарно")
-
     if total_goals >= 200:
         unlocked.append("🏆 **Бомбардир** — Забито 200+ голов суммарно")
-
     if b_max >= 5:
         unlocked.append("🔥 **Хет-трик** — 5+ голов за один матч через бота")
-
     if total_hours >= 20:
         unlocked.append("⏱️ **Трудоголик** — Наиграно 20+ часов")
-
-    if total_hours >= 100:
-        unlocked.append("🛡️ **Фанатик игры** — Наиграно 100+ часов")
-
     return unlocked
 
 
@@ -370,26 +354,12 @@ async def start_add_game(message: types.Message, state: FSMContext):
 @dp.message(GameForm.waiting_for_goals)
 async def process_goals(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer(
-            "⚠️ Введи целое число (например: `2`, `3`):", parse_mode="Markdown"
-        )
+        await message.answer("⚠️ Введи целое число:")
         return
-
     goals = int(message.text)
-    if goals > 50:
-        await message.answer(
-            "🚨 Невозможно забить больше 50 голов за матч. Повтори ввод:"
-        )
-        return
-    if goals < 0:
-        await message.answer("⚠️ Количество голов не может быть отрицательным.")
-        return
-
     await state.update_data(goals=goals)
     await state.set_state(GameForm.waiting_for_hours)
-    await message.answer(
-        "⏱️ Сколько часов длился матч или тренировка? (например: `1.5`):"
-    )
+    await message.answer("⏱️ Сколько часов длился матч или тренировка?")
 
 
 @dp.message(GameForm.waiting_for_hours)
@@ -397,11 +367,7 @@ async def process_hours(message: types.Message, state: FSMContext):
     try:
         hours = float(message.text.replace(",", "."))
     except ValueError:
-        await message.answer("⚠️ Введи корректное число часов (например: `1.5`):")
-        return
-
-    if hours <= 0 or hours > 24:
-        await message.answer("🚨 Время матча должно быть от 0.1 до 24 часов.")
+        await message.answer("⚠️ Введи корректное число часов:")
         return
 
     user_data = await state.get_data()
@@ -425,22 +391,11 @@ async def process_hours(message: types.Message, state: FSMContext):
         (user_id, username, "Не указана"),
     )
     conn.commit()
-
-    cursor.execute(
-        "SELECT MAX(goals) FROM matches WHERE user_id = ?", (user_id,)
-    )
-    max_goals = cursor.fetchone()[0]
     conn.close()
-
-    record_text = ""
-    if goals == max_goals and goals > 0:
-        record_text = (
-            "\n\n🎉 **Отлично! Это твой лучший результат за матч через бота.** 🔥"
-        )
 
     await state.clear()
     await message.answer(
-        f"✅ **Матч успешно сохранен!**\n\n📅 Дата: `{today}`\n⚽ Голы: **{goals}**\n⏱️ Время: **{hours} ч.**{record_text}",
+        f"✅ **Матч успешно сохранен!**\n📅 Дата: `{today}`\n⚽ Голы: **{goals}**\n⏱️ Время: **{hours} ч.**",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown",
     )
@@ -451,29 +406,25 @@ async def process_hours(message: types.Message, state: FSMContext):
 async def show_my_achievements(message: types.Message):
     user_id = message.from_user.id
     achievements = check_achievements(user_id)
-
     if not achievements:
         await message.answer(
-            "🎖️ У тебя пока нет открытых достижений. Запиши матч или добавь прошлую статистику!"
+            "🎖️ У тебя пока нет открытых достижений. Запиши матч!"
         )
         return
-
     text = "🎖️ **ТВОИ ДОСТИЖЕНИЯ:**\n\n"
     for ach in achievements:
         text += f"• {ach}\n"
-
     await message.answer(text, parse_mode="Markdown")
 
 
-# --- ТАБЛИЦА ЛИДЕРОВ (ПО ПОЗИЦИЯМ) ---
+# --- ТАБЛИЦА ЛИДЕРОВ ---
 @dp.message(F.text == "🏆 Таблица лидеров")
 async def show_leaderboard_menu(message: types.Message):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🌍 Общий топ (Все позиции)",
-                    callback_data="top_all",
+                    text="🌍 Общий топ", callback_data="top_all"
                 )
             ],
             [
@@ -508,7 +459,6 @@ async def show_leaderboard_menu(message: types.Message):
 @dp.callback_query(F.data.startswith("top_"))
 async def show_top_by_position(callback: types.CallbackQuery):
     pos_filter = callback.data.split("_")[1]
-
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
 
@@ -527,115 +477,29 @@ async def show_top_by_position(callback: types.CallbackQuery):
         query += " WHERE p.position = ?"
         query += " GROUP BY p.user_id ORDER BY total_goals DESC LIMIT 10"
         cursor.execute(query, (pos_filter,))
-        title_text = f"🏆 **ТОП-10 ПОЗИЦИЯ: {pos_filter.upper()}** 🏆"
     else:
         query += " GROUP BY p.user_id ORDER BY total_goals DESC LIMIT 10"
         cursor.execute(query)
-        title_text = "🏆 **ОБЩИЙ ТОП-10 ИГРОКОВ СЕТИ** 🏆"
 
     rows = cursor.fetchall()
     conn.close()
 
     if not rows or all(r[3] == 0 for r in rows):
         await callback.message.edit_text(
-            "🏆 В этой категории пока нет игроков с результатами."
+            "🏆 В этой категории пока нет игроков."
         )
         await callback.answer()
         return
 
-    text = f"{title_text}\n\n"
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-
-    keyboard_buttons = []
+    text = "🏆 **ТОП-10 ИГРОКОВ:**\n\n"
     for i, row in enumerate(rows):
         u_id, username, position, total_goals, total_matches = row
         display_name = (
             f"@{username}" if not username.startswith("Игрок") else username
         )
-        medal = medals[i] if i < len(medals) else "⚽"
-        pos_label = f"[{position}]" if position != "Не указана" else ""
+        text += f"{i+1}. **{display_name}** — ⚽ **{total_goals}** голов\n"
 
-        text += f"{medal} **{display_name}** {pos_label} — ⚽ **{total_goals}** голов *({total_matches} игр)*\n"
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text=f"⚔️ Дуэль с {display_name}", callback_data=f"duel_{u_id}"
-            )
-        ])
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    await callback.message.edit_text(
-        text, reply_markup=keyboard, parse_mode="Markdown"
-    )
-    await callback.answer()
-
-
-# --- ДУЭЛЬ СТАТИСТИКИ ---
-@dp.callback_query(F.data.startswith("duel_"))
-async def process_duel(callback: types.CallbackQuery):
-    target_user_id = int(callback.data.split("_")[1])
-    my_user_id = callback.from_user.id
-
-    conn = sqlite3.connect("football_bot.db")
-    cursor = conn.cursor()
-
-    def get_full_user_stats(uid):
-        cursor.execute(
-            "SELECT username, position, past_goals, past_matches, past_hours FROM profiles WHERE user_id = ?",
-            (uid,),
-        )
-        p = cursor.fetchone()
-        cursor.execute(
-            "SELECT SUM(goals), SUM(hours), COUNT(id) FROM matches WHERE user_id = ?",
-            (uid,),
-        )
-        m = cursor.fetchone()
-        return p, m
-
-    t_profile, t_matches_db = get_full_user_stats(target_user_id)
-    m_profile, m_matches_db = get_full_user_stats(my_user_id)
-    conn.close()
-
-    if not t_profile:
-        await callback.answer("❌ Игрок не найден.", show_alert=True)
-        return
-
-    t_name, t_pos, t_pg, t_pm, t_ph = t_profile
-    t_bg, t_bh, t_bm = (
-        t_matches_db if t_matches_db else (0, 0.0, 0)
-    )
-    t_goals = t_pg + (t_bg if t_bg else 0)
-    t_matches = t_pm + (t_bm if t_bm else 0)
-    t_hours = t_ph + (t_bh if t_bh else 0.0)
-
-    m_name, m_pos, m_pg, m_pm, m_ph = (
-        m_profile if m_profile else ("Я", "Не указана", 0, 0, 0.0)
-    )
-    m_bg, m_bh, m_bm = (
-        m_matches_db if m_matches_db else (0, 0.0, 0)
-    )
-    m_goals = m_pg + (m_bg if m_bg else 0)
-    m_matches = m_pm + (m_bm if m_bm else 0)
-    m_hours = m_ph + (m_bh if m_bh else 0.0)
-
-    t_display = f"@{t_name}" if not t_name.startswith("Игрок") else t_name
-    m_display = f"@{m_name}" if not m_name.startswith("Игрок") else m_name
-
-    text = (
-        f"⚔️ **СРАВНЕНИЕ СТАТИСТИКИ** ⚔️\n\n"
-        f"👤 **Ты ({m_display})** VS 👤 **Соперник ({t_display})**\n\n"
-        f"⚽ Голы: **{m_goals}** 🆚 **{t_goals}**\n"
-        f"👟 Матчи: **{m_matches}** 🆚 **{t_matches}**\n"
-        f"⏱️ Время: **{m_hours:.1f}ч** 🆚 **{t_hours:.1f}ч**\n\n"
-    )
-
-    if m_goals > t_goals:
-        text += "🎉 Ты впереди по голям!"
-    elif m_goals < t_goals:
-        text += "💪 Соперник впереди по голям. Повод поднажать!"
-    else:
-        text += "🤝 Полное равенство!"
-
-    await callback.message.answer(text, parse_mode="Markdown")
+    await callback.message.edit_text(text, parse_mode="Markdown")
     await callback.answer()
 
 
@@ -653,10 +517,146 @@ async def select_match_to_delete(message: types.Message):
     conn.close()
 
     if not rows:
-        await message.answer(
-            "❌ Нет добавленных через бота матчей для удаления."
-        )
+        await message.answer("❌ Нет матчей для удаления.")
         return
 
     keyboard_buttons = []
     for row in rows:
+        match_id, date, goals, hours = row
+        btn_text = f"❌ [{date}] Голов: {goals}"
+        keyboard_buttons.append(
+            [InlineKeyboardButton(text=btn_text, callback_data=f"del_{match_id}")]
+        )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await message.answer(
+        "🗑️ **Выбери матч для удаления:**",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+    )
+
+
+@dp.callback_query(F.data.startswith("del_"))
+async def process_delete_match(callback: types.CallbackQuery):
+    match_id = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM matches WHERE id = ? AND user_id = ?",
+        (match_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+    await callback.message.edit_text("🗑️ Матч успешно удален!")
+    await callback.answer()
+
+
+# --- ЛИЧНАЯ СТАТИСТИКА ---
+@dp.message(F.text == "📊 Моя статистика")
+async def show_stats(message: types.Message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT position, past_goals, past_matches, past_hours FROM profiles WHERE user_id = ?",
+        (user_id,),
+    )
+    prof = cursor.fetchone()
+    cursor.execute(
+        "SELECT SUM(goals), SUM(hours), COUNT(id) FROM matches WHERE user_id = ?",
+        (user_id,),
+    )
+    match_data = cursor.fetchone()
+    conn.close()
+
+    position = prof[0] if prof and prof[0] else "Не указана"
+    p_goals = prof[1] if prof and prof[1] else 0
+    p_matches = prof[2] if prof and prof[2] else 0
+    p_hours = prof[3] if prof and prof[3] else 0.0
+
+    b_goals, b_hours, b_matches = (
+        match_data if match_data else (0, 0.0, 0)
+    )
+    b_goals = b_goals if b_goals else 0
+    b_hours = b_hours if b_hours else 0.0
+    b_matches = b_matches if b_matches else 0
+
+    total_goals = p_goals + b_goals
+    total_matches = p_matches + b_matches
+    total_hours = p_hours + b_hours
+    current_rank = get_user_rank(total_goals)
+
+    text = (
+        f"📊 **ТВОЯ СТАТИСТИКА**\n\n"
+        f"👤 Позиция: **{position}**\n"
+        f"🎖️ Ранг: **{current_rank}**\n"
+        f"👟 Всего игр: **{total_matches}**\n"
+        f"⚽ Всего голов: **{total_goals}**\n"
+        f"⏱️ Наиграно: **{total_hours:.1f} ч.**"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+
+# --- СТАТИСТИКА СООБЩЕСТВА ---
+@dp.message(F.text == "🌍 Статистика сообщества")
+async def show_global_stats(message: types.Message):
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*), SUM(past_goals), SUM(past_matches), SUM(past_hours) FROM profiles"
+    )
+    p_count, p_g, p_m, p_h = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*), SUM(goals), SUM(hours) FROM matches")
+    b_count, b_g, b_h = cursor.fetchone()
+    conn.close()
+
+    total_goals = (p_g or 0) + (b_g or 0)
+    total_matches = (p_m or 0) + (b_count or 0)
+    total_hours = (p_h or 0.0) + (b_h or 0.0)
+
+    text = (
+        f"🌍 **СТАТИСТИКА СООБЩЕСТВА**\n\n"
+        f"⚽ Суммарно голов: **{total_goals}**\n"
+        f"👟 Сыграно матчей: **{total_matches}**\n"
+        f"⏱️ Суммарно часов: **{total_hours:.1f} ч.**"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+
+# --- ГРАФИК ПРОГРЕССА ---
+@dp.message(F.text == "📈 График прогресса")
+async def show_chart(message: types.Message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect("football_bot.db")
+    df = pd.read_sql_query(
+        "SELECT date, goals FROM matches WHERE user_id = ?",
+        conn,
+        params=(user_id,),
+    )
+    conn.close()
+
+    if df.empty:
+        await message.answer("📈 Запиши хотя бы пару матчей через бота!")
+        return
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(
+        range(len(df)),
+        df["goals"],
+        marker="o",
+        color="#2ecc71",
+        linewidth=2,
+        markersize=8,
+    )
+    plt.title("Динамика результатов", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    plt.close()
+
+    photo = BufferedInputFile(buf.read(), filename="chart.png")
+    await message.answer_photo(
+        photo=photo, caption="📈 **Твой граф
