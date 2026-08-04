@@ -5,19 +5,22 @@ import logging
 import random
 import sqlite3
 
-import aiohttp
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BufferedInputFile, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import (
+    BufferedInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# 🔑 ТВОИ КЛЮЧИ
+# 🔑 ТОКЕН ТВОЕГО TELEGRAM БОТА
 BOT_TOKEN = "8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s"
-# Вставь сюда ключ от Groq (начинается с gsk_... получить можно за секунду на console.groq.com)
-GROQ_API_KEY = "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"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -33,6 +36,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS matches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
+            username TEXT,
             date TEXT,
             goals INTEGER,
             hours REAL
@@ -50,26 +54,26 @@ class GameForm(StatesGroup):
     waiting_for_hours = State()
 
 
-class CoachForm(StatesGroup):
-    waiting_for_question = State()
-
-
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
             [
                 KeyboardButton(text="⚽ Записать матч"),
-                KeyboardButton(text="🗑️ Удалить последний"),
+                KeyboardButton(text="🗑️ Удалить матч"),
             ],
             [
                 KeyboardButton(text="📊 Статистика"),
                 KeyboardButton(text="📜 История"),
             ],
             [
-                KeyboardButton(text="📈 График"),
-                KeyboardButton(text="🎯 Челлендж дня"),
+                KeyboardButton(text="🏆 Таблица лидеров"),
+                KeyboardButton(text="🎖️ Мои достижения"),
             ],
-            [KeyboardButton(text="🧠 ИИ-Тренер")],
+            [
+                KeyboardButton(text="📈 График"),
+                KeyboardButton(text="🎯 Случайный челлендж"),
+            ],
+            [KeyboardButton(text="🌍 Общая статистика")],
         ],
         resize_keyboard=True,
     )
@@ -78,28 +82,107 @@ def get_main_keyboard():
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer(
-        f"Салам, {message.from_user.first_name}! ⚽🔥\n"
-        "Твой ультимативный футбольный бот запущен и готов разрывать!",
+        f"Привет, {message.from_user.first_name}.\n"
+        "Футбольный бот готов к работе. Выберите нужное действие в меню ниже.",
         reply_markup=get_main_keyboard(),
     )
+
+
+# --- СИСТЕМА РАНГОВ ---
+def get_user_rank(total_goals):
+    if total_goals >= 200:
+        return "Легенда"
+    elif total_goals >= 100:
+        return "Элитный бомбардир"
+    elif total_goals >= 50:
+        return "Профессионал"
+    elif total_goals >= 20:
+        return "Уверенный игрок"
+    elif total_goals >= 5:
+        return "Любитель"
+    else:
+        return "Новичок"
+
+
+# --- ПРОВЕРКА ДОСТИЖЕНИЙ ---
+def check_achievements(user_id):
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT COUNT(*), SUM(goals), MAX(goals), SUM(hours) FROM matches WHERE user_id = ?",
+        (user_id,),
+    )
+    res = cursor.fetchone()
+    conn.close()
+
+    if not res or res[0] == 0:
+        return []
+
+    total_games, total_goals, max_goals, total_hours = res
+    total_goals = total_goals if total_goals else 0
+    max_goals = max_goals if max_goals else 0
+    total_hours = total_hours if total_hours else 0
+
+    unlocked = []
+
+    if total_games >= 1:
+        unlocked.append("Первый шаг — записан первый матч")
+
+    if total_goals >= 50:
+        unlocked.append("Снайпер — забито 50 голов суммарно")
+
+    if total_goals >= 200:
+        unlocked.append("Бомбардир — забито 200 голов суммарно")
+
+    if max_goals >= 5:
+        unlocked.append("Хет-трик — 5 и более голов за один матч")
+
+    if max_goals >= 10:
+        unlocked.append("Рекордсмен — 10 и более голов за один матч")
+
+    if total_hours >= 10:
+        unlocked.append("Активный — суммарно наиграно 10 часов")
+
+    if total_hours >= 50:
+        unlocked.append("Преданный делу — суммарно наиграно 50 часов")
+
+    if total_games >= 20:
+        unlocked.append("Регулярность — сыграно 20 матчей")
+
+    return unlocked
 
 
 # --- ЗАПИСЬ МАТЧА ---
 @dp.message(F.text == "⚽ Записать матч")
 async def start_add_game(message: types.Message, state: FSMContext):
     await state.set_state(GameForm.waiting_for_goals)
-    await message.answer("Сколько голов забил за этот матч? (Напиши цифру):")
+    await message.answer("Сколько голов вы забили в этом матче? Введите число:")
 
 
 @dp.message(GameForm.waiting_for_goals)
 async def process_goals(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("⚠️ Введи просто число (например: 0, 2, 5):")
+        await message.answer("Пожалуйста, введите целое число (например: 2, 3):")
         return
 
-    await state.update_data(goals=int(message.text))
+    goals = int(message.text)
+
+    if goals > 50:
+        await message.answer(
+            "Значение слишком велико. Максимальное количество голов за матч — 50. Повторите ввод:"
+        )
+        return
+
+    if goals < 0:
+        await message.answer("Количество голов не может быть отрицательным.")
+        return
+
+    await state.update_data(goals=goals)
     await state.set_state(GameForm.waiting_for_hours)
-    await message.answer("Сколько часов играл? (например: 1, 1.5, 2):")
+    await message.answer(
+        "Сколько часов длился матч или тренировка? (например: 1, 1.5, 2):"
+    )
 
 
 @dp.message(GameForm.waiting_for_hours)
@@ -107,19 +190,30 @@ async def process_hours(message: types.Message, state: FSMContext):
     try:
         hours = float(message.text.replace(",", "."))
     except ValueError:
-        await message.answer("⚠️ Введи число часов (например: 1.5 или 2):")
+        await message.answer("Введите корректное число часов (например: 1.5):")
+        return
+
+    if hours <= 0 or hours > 24:
+        await message.answer(
+            "Время матча должно быть от 0.1 до 24 часов. Повторите ввод:"
+        )
         return
 
     user_data = await state.get_data()
     goals = user_data["goals"]
     today = datetime.now().strftime("%d.%m.%Y")
     user_id = message.from_user.id
+    username = (
+        message.from_user.username
+        or message.from_user.first_name
+        or "Пользователь"
+    )
 
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO matches (user_id, date, goals, hours) VALUES (?, ?, ?, ?)",
-        (user_id, today, goals, hours),
+        "INSERT INTO matches (user_id, username, date, goals, hours) VALUES (?, ?, ?, ?, ?)",
+        (user_id, username, today, goals, hours),
     )
     conn.commit()
 
@@ -129,49 +223,207 @@ async def process_hours(message: types.Message, state: FSMContext):
     max_goals = cursor.fetchone()[0]
     conn.close()
 
-    achievement = ""
+    record_text = ""
     if goals == max_goals and goals > 0:
-        achievement = "\n\n🏆 **Новый личный рекорд по голам за матч!** 🔥"
+        record_text = (
+            "\n\nПоздравляем, это ваш лучший результат по голам за матч."
+        )
 
     await state.clear()
     await message.answer(
-        f"✅ **Матч успешно сохранен в базу!**\n📅 {today}\n⚽ Голы: {goals}\n⏱️ Время: {hours} ч.{achievement}",
-        parse_mode="Markdown",
+        f"Матч успешно сохранен.\n📅 Дата: {today}\n⚽ Голы: {goals}\n⏱️ Время: {hours} ч.{record_text}",
         reply_markup=get_main_keyboard(),
     )
 
 
-# --- УДАЛЕНИЕ ПОСЛЕДНЕГО МАТЧА ---
-@dp.message(F.text == "🗑️ Удалить последний")
-async def delete_last_game(message: types.Message):
+# --- ДОСТИЖЕНИЯ ---
+@dp.message(F.text == "🎖️ Мои достижения")
+async def show_my_achievements(message: types.Message):
     user_id = message.from_user.id
+    achievements = check_achievements(user_id)
+
+    if not achievements:
+        await message.answer(
+            "У вас пока нет разблокированных достижений. Запишите свой первый матч."
+        )
+        return
+
+    text = "Полученные достижения:\n\n"
+    for ach in achievements:
+        text += f"- {ach}\n"
+
+    await message.answer(text)
+
+
+# --- ТАБЛИЦА ЛИДЕРОВ ---
+@dp.message(F.text == "🏆 Таблица лидеров")
+async def show_leaderboard(message: types.Message):
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT user_id, username, SUM(goals) as total_goals, COUNT(id) as total_matches 
+        FROM matches 
+        GROUP BY user_id 
+        ORDER BY total_goals DESC 
+        LIMIT 10
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await message.answer("Таблица лидеров пока пуста.")
+        return
+
+    text = (
+        "Таблица лидеров\n"
+        "Выберите игрока в списке ниже для сравнения статистики:\n\n"
+    )
+    positions = ["1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.", "10."]
+
+    keyboard_buttons = []
+    for i, row in enumerate(rows):
+        u_id, username, total_goals, total_matches = row
+        display_name = (
+            f"@{username}"
+            if not username.startswith("Пользователь")
+            else username
+        )
+        pos = positions[i] if i < len(positions) else f"{i+1}."
+
+        text += f"{pos} {display_name} — {total_goals} голов ({total_matches} игр)\n"
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=f"Сравнить с {display_name}", callback_data=f"duel_{u_id}"
+            )
+        ])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await message.answer(text, reply_markup=keyboard)
+
+
+# --- СРАВНЕНИЕ (ДУЭЛЬ СТАТИСТИКИ) ---
+@dp.callback_query(F.data.startswith("duel_"))
+async def process_duel(callback: types.CallbackQuery):
+    target_user_id = int(callback.data.split("_")[1])
+    my_user_id = callback.from_user.id
+
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT id, date, goals, hours FROM matches WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-        (user_id,),
+        "SELECT username, SUM(goals), SUM(hours), COUNT(id) FROM matches WHERE"
+        " user_id = ?",
+        (target_user_id,),
     )
-    last_match = cursor.fetchone()
+    target_data = cursor.fetchone()
 
-    if not last_match:
-        conn.close()
-        await message.answer("❌ У тебя пока нет записанных матчей.")
-        return
-
-    match_id, date, goals, hours = last_match
-    cursor.execute("DELETE FROM matches WHERE id = ?", (match_id,))
-    conn.commit()
+    cursor.execute(
+        "SELECT username, SUM(goals), SUM(hours), COUNT(id) FROM matches WHERE"
+        " user_id = ?",
+        (my_user_id,),
+    )
+    my_data = cursor.fetchone()
     conn.close()
 
-    await message.answer(
-        f"🗑️ **Удален последний матч:**\n📅 {date} — ⚽ {goals} голов | ⏱️ {hours} ч.",
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard(),
+    if not target_data or target_data[1] is None:
+        await callback.answer(
+            "Данные выбранного пользователя не найдены.", show_alert=True
+        )
+        return
+
+    t_name, t_goals, t_hours, t_matches = target_data
+    m_name, m_goals, m_hours, m_matches = my_data
+
+    t_goals = t_goals if t_goals else 0
+    t_hours = t_hours if t_hours else 0
+    t_matches = t_matches if t_matches else 0
+
+    m_goals = m_goals if m_goals else 0
+    m_hours = m_hours if m_hours else 0
+    m_matches = m_matches if m_matches else 0
+
+    t_display = f"@{t_name}" if not t_name.startswith("Пользователь") else t_name
+    m_display = f"@{m_name}" if not m_name.startswith("Пользователь") else m_name
+
+    text = (
+        f"Сравнение статистики\n\n"
+        f"Вы ({m_display}) / Соперник ({t_display})\n\n"
+        f"- Голы: {m_goals} / {t_goals}\n"
+        f"- Матчи: {m_matches} / {t_matches}\n"
+        f"- Наиграно часов: {m_hours:.1f} ч. / {t_hours:.1f} ч.\n\n"
     )
 
+    if m_goals > t_goals:
+        text += "Вы опережаете соперника по количеству забитых голов."
+    elif m_goals < t_goals:
+        text += "Соперник опережает вас по количеству забитых голов."
+    else:
+        text += "Показатели по забитым голам равны."
 
-# --- СТАТИСТИКА ---
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+# --- УДАЛЕНИЕ МАТЧА ---
+@dp.message(F.text == "🗑️ Удалить матч")
+async def select_match_to_delete(message: types.Message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, date, goals, hours FROM matches WHERE user_id = ? ORDER BY id DESC LIMIT 10",
+        (user_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await message.answer("У вас нет сохраненных матчей для удаления.")
+        return
+
+    keyboard_buttons = []
+    for row in rows:
+        match_id, date, goals, hours = row
+        btn_text = f"[{date}] Голов: {goals} | Время: {hours}ч"
+        keyboard_buttons.append(
+            [InlineKeyboardButton(text=btn_text, callback_data=f"del_{match_id}")]
+        )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await message.answer("Выберите матч для удаления:", reply_markup=keyboard)
+
+
+@dp.callback_query(F.data.startswith("del_"))
+async def process_delete_match(callback: types.CallbackQuery):
+    match_id = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT date, goals, hours FROM matches WHERE id = ? AND user_id = ?",
+        (match_id, user_id),
+    )
+    match = cursor.fetchone()
+
+    if match:
+        date, goals, hours = match
+        cursor.execute("DELETE FROM matches WHERE id = ?", (match_id,))
+        conn.commit()
+        conn.close()
+        await callback.message.edit_text(
+            f"Матч удален:\nДата: {date} — Голы: {goals} | Время: {hours} ч."
+        )
+    else:
+        conn.close()
+        await callback.message.edit_text(
+            "Матч не найден или уже был удален ранее."
+        )
+
+    await callback.answer()
+
+
+# --- ЛИЧНАЯ СТАТИСТИКА ---
 @dp.message(F.text == "📊 Статистика")
 async def show_stats(message: types.Message):
     user_id = message.from_user.id
@@ -184,7 +436,9 @@ async def show_stats(message: types.Message):
     conn.close()
 
     if not rows:
-        await message.answer("❌ Статистика пуста! Сыграй хотя бы один матч.")
+        await message.answer(
+            "Статистика пуста. Запишите хотя бы один матч, чтобы увидеть данные."
+        )
         return
 
     total_games = len(rows)
@@ -192,20 +446,53 @@ async def show_stats(message: types.Message):
     total_hours = sum(row[1] for row in rows)
     avg_goals = total_goals / total_games
     max_goals = max(row[0] for row in rows)
+    current_rank = get_user_rank(total_goals)
 
     text = (
-        "--- 📊 **ТВОЯ ПРОДВИНУТАЯ СТАТИСТИКА** ---\n\n"
-        f"🏃‍♂️ Всего игр: **{total_games}**\n"
-        f"⚽ Всего голов: **{total_goals}**\n"
-        f"⏱️ Наиграно часов: **{total_hours:.1f} ч.**\n"
-        f"📈 В среднем: **{avg_goals:.1f}** гола за игру\n"
-        f"👑 Рекорд голов за матч: **{max_goals}**\n"
-        "------------------------------------"
+        "Личная статистика:\n\n"
+        f"- Текущий ранг: {current_rank}\n"
+        f"- Всего игр: {total_games}\n"
+        f"- Всего голов: {total_goals}\n"
+        f"- Наиграно часов: {total_hours:.1f} ч.\n"
+        f"- В среднем за игру: {avg_goals:.1f} гола\n"
+        f"- Рекорд голов за матч: {max_goals}"
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text)
 
 
-# --- ИСТОРИЯ ---
+# --- ОБЩАЯ СТАТИСТИКА ---
+@dp.message(F.text == "🌍 Общая статистика")
+async def show_global_stats(message: types.Message):
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*), SUM(goals), SUM(hours) FROM matches")
+    total_games, total_goals, total_hours = cursor.fetchone()
+
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM matches")
+    total_players = cursor.fetchone()[0]
+    conn.close()
+
+    if not total_games or total_games == 0:
+        await message.answer("Пока нет записей от пользователей.")
+        return
+
+    total_hours = total_hours if total_hours else 0
+    total_goals = total_goals if total_goals else 0
+    avg_global_goals = total_goals / total_games if total_games > 0 else 0
+
+    text = (
+        "Общая статистика системы:\n\n"
+        f"- Всего игроков: {total_players}\n"
+        f"- Сыграно матчей: {total_games}\n"
+        f"- Забито голов суммарно: {total_goals}\n"
+        f"- Суммарно наиграно часов: {total_hours:.1f} ч.\n"
+        f"- Средняя результативность: {avg_global_goals:.1f} гола за игру"
+    )
+    await message.answer(text)
+
+
+# --- ИСТОРИЯ МАТЧЕЙ ---
 @dp.message(F.text == "📜 История")
 async def show_history(message: types.Message):
     user_id = message.from_user.id
@@ -219,17 +506,17 @@ async def show_history(message: types.Message):
     conn.close()
 
     if not rows:
-        await message.answer("❌ История пока пуста.")
+        await message.answer("История матчей пуста.")
         return
 
-    history_text = "--- 📜 **ПОСЛЕДНИЕ МАТЧИ** ---\n\n"
+    history_text = "Последние матчи:\n\n"
     for i, row in enumerate(rows, 1):
-        history_text += f"{i}. 📅 {row[0]} — ⚽ {row[1]} голов | ⏱️ {row[2]} ч.\n"
+        history_text += f"{i}. {row[0]} — Голы: {row[1]} | Время: {row[2]} ч.\n"
 
-    await message.answer(history_text, parse_mode="Markdown")
+    await message.answer(history_text)
 
 
-# --- ГРАФИК ПРОГРЕССА ---
+# --- ГРАФИК ---
 @dp.message(F.text == "📈 График")
 async def show_chart(message: types.Message):
     user_id = message.from_user.id
@@ -243,7 +530,7 @@ async def show_chart(message: types.Message):
 
     if df.empty:
         await message.answer(
-            "❌ Недостаточно данных для построения графика. Запиши хотя бы пару матчей!"
+            "Недостаточно данных для построения графика. Запишите больше матчей."
         )
         return
 
@@ -256,7 +543,7 @@ async def show_chart(message: types.Message):
         linewidth=2,
         markersize=8,
     )
-    plt.title("Твой прогресс по голам", fontsize=14, fontweight="bold")
+    plt.title("Динамика результативности", fontsize=14, fontweight="bold")
     plt.xlabel("Матчи (по порядку)", fontsize=10)
     plt.ylabel("Голы", fontsize=10)
     plt.grid(True, linestyle="--", alpha=0.6)
@@ -269,94 +556,54 @@ async def show_chart(message: types.Message):
 
     photo = BufferedInputFile(buf.read(), filename="chart.png")
     await message.answer_photo(
-        photo=photo,
-        caption="📈 **Твой текущий график результативности!**",
-        parse_mode="Markdown",
+        photo=photo, caption="График изменения результатов по матчам."
     )
 
 
-# --- ЕЖЕДНЕВНЫЙ ЧЕЛЛЕНДЖ ---
-@dp.message(F.text == "🎯 Челлендж дня")
+# --- ГЕНЕРАТОР ЧЕЛЛЕНДЖЕЙ ---
+@dp.message(F.text == "🎯 Случайный челлендж")
 async def daily_challenge(message: types.Message):
-    challenges = [
-        "🎯 **Челлендж на сегодня:** Сделай 100 точных передач в стенку правой и левой ногой без потери контроля.",
-        "⚡ **Челлендж на сегодня:** Выполни 5 челночных рывков по 30 метров на максимальной скорости с отдыхом по 45 секунд.",
-        "⚽ **Челлендж на сегодня:** Потрать 15 минут исключительно на удары слёта из-за штрафной.",
-        "🧠 **Челлендж на сегодня:** Отработай разворот Кройфа (Cruyff turn) или финт шведкой минимум 30 раз.",
+    actions = [
+        "Выполните",
+        "Сделайте",
+        "Отработайте",
+        "Набейте",
+        "Пробейте",
+        "Добейтесь серии из",
     ]
-    await message.answer(random.choice(challenges), parse_mode="Markdown")
+    counts = ["30", "50", "70", "100", "150", "10 точных", "15 мощных"]
+    exercises = [
+        "передач в стенку правой ногой без остановки мяча",
+        "передач в стенку левой ногой с акцентом на точность",
+        "челночных рывков по 30 метров с минимальным отдыхом",
+        "ударов внешней стороной стопы по воротам",
+        "ударов слёта с линии штрафной площади",
+        "приемов мяча грудью с последующим ударом",
+        "разворотов с мячом против условного соперника",
+        "финтов с резким изменением направления движения",
+        "жонглирования мячом попеременно бедрами и стопами",
+        "ведения мяча змейкой между фишками на время",
+    ]
+    extras = [
+        "на время (установите таймер 2 минуты).",
+        "без потери контроля над мячом.",
+        "с добавлением ускорения в конце каждого подхода.",
+        "в высоком темпе.",
+        "чередуя слабую и сильную ногу.",
+    ]
 
-
-# --- ИИ-ТРЕНЕР (ЧЕРЕЗ GROQ API) ---
-@dp.message(F.text == "🧠 ИИ-Тренер")
-async def ask_coach_start(message: types.Message, state: FSMContext):
-    await state.set_state(CoachForm.waiting_for_question)
-    await message.answer(
-        "🧠 **ИИ-Тренер на связи!**\n\nСпроси у меня всё что угодно: про тактику, дриблинг, удары или физику:",
-        parse_mode="Markdown",
+    challenge_text = (
+        f"Рекомендуемое упражнение на сегодня:\n\n"
+        f"{random.choice(actions)} {random.choice(counts)} {random.choice(exercises)} {random.choice(extras)}"
     )
 
-
-@dp.message(CoachForm.waiting_for_question)
-async def process_coach_question(message: types.Message, state: FSMContext):
-    question = message.text
-    await state.clear()
-
-    status_msg = await message.answer(
-        "⏳ *Тренер анализирует твой вопрос...*", parse_mode="Markdown"
-    )
-
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": "llama3-70b-8192",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Ты опытный футбольный тренер. Отвечай емко, давай"
-                    " конкретные практические советы по технике, движению,"
-                    " дриблингу."
-                ),
-            },
-            {"role": "user", "content": question},
-        ],
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, headers=headers, json=payload
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    ai_text = data["choices"][0]["message"]["content"]
-                else:
-                    err_text = await resp.text()
-                    ai_text = f"Ошибка API ({resp.status}): {err_text}"
-
-        await status_msg.delete()
-        await message.answer(
-            f"💡 **Ответ ИИ-Тренера:**\n\n{ai_text}",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(),
-        )
-
-    except Exception as e:
-        await status_msg.delete()
-        await message.answer(
-            f"⚠️ Ошибка связи с ИИ: {e}", reply_markup=get_main_keyboard()
-        )
+    await message.answer(challenge_text)
 
 
 async def main():
-    print("🚀 Ультимативный футбольный бот запущен!")
+    print("Бот запущен и работает в штатном режиме.")
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
