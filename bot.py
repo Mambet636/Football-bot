@@ -5,26 +5,21 @@ import logging
 import random
 import sqlite3
 
+import aiohttp
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, KeyboardButton, ReplyKeyboardMarkup
-import google.generativeai as genai
 import matplotlib.pyplot as plt
 import pandas as pd
 
 # 🔑 ТВОИ КЛЮЧИ
 BOT_TOKEN = "8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s"
-GEMINI_KEY = "AQ.Ab8RN6LLF9PQPNLeBGjlZSbb-OKFbRw_uFXk_f4LJfaD1TdMLw"
-
-# Настройка Gemini AI
-genai.configure(api_key=GEMINI_KEY)
-ai_model = genai.GenerativeModel("gemini-1.5-flash")
+GEMINI_KEY = "AQ.Ab8RN6J0F41zfDbSpXt5OcuLQ5PDpiQIHziu7SzMkjd2qwR0-Q"
 
 logging.basicConfig(level=logging.INFO)
 
-# Прямое подключение без проблемных прокси
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -291,7 +286,7 @@ async def daily_challenge(message: types.Message):
     await message.answer(random.choice(challenges), parse_mode="Markdown")
 
 
-# --- ИИ-ТРЕНЕР ---
+# --- ИИ-ТРЕНЕР (ЧЕРЕЗ ПРЯМОЙ API ЗАПРОС) ---
 @dp.message(F.text == "🧠 ИИ-Тренер")
 async def ask_coach_start(message: types.Message, state: FSMContext):
     await state.set_state(CoachForm.waiting_for_question)
@@ -310,15 +305,43 @@ async def process_coach_question(message: types.Message, state: FSMContext):
         "⏳ *Тренер анализирует твой вопрос...*", parse_mode="Markdown"
     )
 
-    try:
-        prompt = (
-            "Ты опытный футбольный тренер. Отвечай емко, давай"
-            " конкретные практические советы по технике, движению,"
-            f" дриблингу. Вопрос игрока: {question}"
-        )
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    headers = {
+        "Authorization": f"Bearer {GEMINI_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": (
+                            "Ты опытный футбольный тренер. Отвечай емко, давай"
+                            " конкретные практические советы по технике,"
+                            f" движению, дриблингу. Вопрос игрока: {question}"
+                        )
+                    }
+                ]
+            }
+        ]
+    }
 
-        response = ai_model.generate_content(prompt)
-        ai_text = response.text
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url, headers=headers, json=payload
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    ai_text = (
+                        data.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "Пустой ответ")
+                    )
+                else:
+                    err_text = await resp.text()
+                    ai_text = f"Ошибка API ({resp.status}): {err_text}"
 
         await status_msg.delete()
         await message.answer(
