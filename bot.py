@@ -5,9 +5,7 @@ import logging
 import random
 import sqlite3
 
-import aiohttp
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -26,10 +24,8 @@ ai_model = genai.GenerativeModel("gemini-1.5-flash")
 
 logging.basicConfig(level=logging.INFO)
 
-# 🛠️ СТАБИЛЬНОЕ ПОДКЛЮЧЕНИЕ ПРОКСИ ДЛЯ PYTHONANYWHERE (БЕЗ 503 ОШИБОК)
-session = AiohttpSession()
-session._session = aiohttp.ClientSession(proxy="http://proxy.server:3128")
-bot = Bot(token=BOT_TOKEN, session=session)
+# Прямое подключение без проблемных прокси
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 
@@ -87,7 +83,7 @@ def get_main_keyboard():
 async def cmd_start(message: types.Message):
     await message.answer(
         f"Салам, {message.from_user.first_name}! ⚽🔥\n"
-        "Твой ультимативный футбольный бот запущен. База данных активирована, ачивки, графики и ИИ-тренер на месте!",
+        "Твой ультимативный футбольный бот запущен и готов разрывать!",
         reply_markup=get_main_keyboard(),
     )
 
@@ -123,17 +119,14 @@ async def process_hours(message: types.Message, state: FSMContext):
     today = datetime.now().strftime("%d.%m.%Y")
     user_id = message.from_user.id
 
-    # Сохраняем в базу данных
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO matches (user_id, date, goals, hours) VALUES (?, ?, ?,"
-        " ?)",
+        "INSERT INTO matches (user_id, date, goals, hours) VALUES (?, ?, ?, ?)",
         (user_id, today, goals, hours),
     )
     conn.commit()
 
-    # Проверка на личный рекорд по голам
     cursor.execute(
         "SELECT MAX(goals) FROM matches WHERE user_id = ?", (user_id,)
     )
@@ -146,8 +139,7 @@ async def process_hours(message: types.Message, state: FSMContext):
 
     await state.clear()
     await message.answer(
-        f"✅ **Матч успешно сохранен в базу!**\n📅 {today}\n⚽ Голы:"
-        f" {goals}\n⏱️ Время: {hours} ч.{achievement}",
+        f"✅ **Матч успешно сохранен в базу!**\n📅 {today}\n⚽ Голы: {goals}\n⏱️ Время: {hours} ч.{achievement}",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard(),
     )
@@ -161,8 +153,7 @@ async def delete_last_game(message: types.Message):
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT id, date, goals, hours FROM matches WHERE user_id = ? ORDER BY"
-        " id DESC LIMIT 1",
+        "SELECT id, date, goals, hours FROM matches WHERE user_id = ? ORDER BY id DESC LIMIT 1",
         (user_id,),
     )
     last_match = cursor.fetchone()
@@ -178,8 +169,7 @@ async def delete_last_game(message: types.Message):
     conn.close()
 
     await message.answer(
-        f"🗑️ **Удален последний матч:**\n📅 {date} — ⚽ {goals} голов | ⏱️"
-        f" {hours} ч.",
+        f"🗑️ **Удален последний матч:**\n📅 {date} — ⚽ {goals} голов | ⏱️ {hours} ч.",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard(),
     )
@@ -226,8 +216,7 @@ async def show_history(message: types.Message):
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT date, goals, hours FROM matches WHERE user_id = ? ORDER BY id"
-        " DESC LIMIT 10",
+        "SELECT date, goals, hours FROM matches WHERE user_id = ? ORDER BY id DESC LIMIT 10",
         (user_id,),
     )
     rows = cursor.fetchall()
@@ -239,9 +228,7 @@ async def show_history(message: types.Message):
 
     history_text = "--- 📜 **ПОСЛЕДНИЕ МАТЧИ** ---\n\n"
     for i, row in enumerate(rows, 1):
-        history_text += (
-            f"{i}. 📅 {row[0]} — ⚽ {row[1]} голов | ⏱️ {row[2]} ч.\n"
-        )
+        history_text += f"{i}. 📅 {row[0]} — ⚽ {row[1]} голов | ⏱️ {row[2]} ч.\n"
 
     await message.answer(history_text, parse_mode="Markdown")
 
@@ -260,8 +247,7 @@ async def show_chart(message: types.Message):
 
     if df.empty:
         await message.answer(
-            "❌ Недостаточно данных для построения графика. Запиши хотя бы"
-            " пару матчей!"
+            "❌ Недостаточно данных для построения графика. Запиши хотя бы пару матчей!"
         )
         return
 
@@ -297,14 +283,10 @@ async def show_chart(message: types.Message):
 @dp.message(F.text == "🎯 Челлендж дня")
 async def daily_challenge(message: types.Message):
     challenges = [
-        "🎯 **Челлендж на сегодня:** Сделай 100 точных передач в стенку правой и"
-        " левой ногой без потери контроля.",
-        "⚡ **Челлендж на сегодня:** Выполни 5 челночных рывков по 30 метров на"
-        " максимальной скорости с отдыхом по 45 секунд.",
-        "⚽ **Челлендж на сегодня:** Потрать 15 минут исключительно на удары"
-        " слёта из-за штрафной.",
-        "🧠 **Челлендж на сегодня:** Отработай разворот Кройфа (Cruyff turn) или"
-        " финт шведкой минимум 30 раз.",
+        "🎯 **Челлендж на сегодня:** Сделай 100 точных передач в стенку правой и левой ногой без потери контроля.",
+        "⚡ **Челлендж на сегодня:** Выполни 5 челночных рывков по 30 метров на максимальной скорости с отдыхом по 45 секунд.",
+        "⚽ **Челлендж на сегодня:** Потрать 15 минут исключительно на удары слёта из-за штрафной.",
+        "🧠 **Челлендж на сегодня:** Отработай разворот Кройфа (Cruyff turn) или финт шведкой минимум 30 раз.",
     ]
     await message.answer(random.choice(challenges), parse_mode="Markdown")
 
@@ -314,9 +296,7 @@ async def daily_challenge(message: types.Message):
 async def ask_coach_start(message: types.Message, state: FSMContext):
     await state.set_state(CoachForm.waiting_for_question)
     await message.answer(
-        "🧠 **Настоящий ИИ-Тренер на связи!**\n\n"
-        "Спроси у меня всё что угодно: про тактику, дриблинг, разминку или"
-        " восстановление:",
+        "🧠 **ИИ-Тренер на связи!**\n\nСпроси у меня всё что угодно: про тактику, дриблинг, удары или физику:",
         parse_mode="Markdown",
     )
 
@@ -332,9 +312,9 @@ async def process_coach_question(message: types.Message, state: FSMContext):
 
     try:
         prompt = (
-            "Ты опытный, профессиональный футбольный тренер и спортивный"
-            " физиолог. Отвечай емко, давай конкретные практические советы по"
-            f" технике, движению, дриблингу и физике. Вопрос игрока: {question}"
+            "Ты опытный футбольный тренер. Отвечай емко, давай"
+            " конкретные практические советы по технике, движению,"
+            f" дриблингу. Вопрос игрока: {question}"
         )
 
         response = ai_model.generate_content(prompt)
@@ -361,3 +341,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
