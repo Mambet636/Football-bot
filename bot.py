@@ -18,10 +18,13 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
+import matplotlib
+
+matplotlib.use("Agg")  # Предотвращает крах сервера при создании графиков
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# 🔑 ТОКЕН БЕРЕТСЯ ИЗ НАСТРОЕК RAILWAY (Variables)
+# 🔑 ТОКЕН БЕРЕТСЯ АВТОМАТИЧЕСКИ ИЗ НАСТРОЕК RAILWAY (Variables)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -657,6 +660,4 @@ async def show_chart(message: types.Message):
     buf.seek(0)
     plt.close()
 
-    photo = BufferedInputFile(buf.read(), filename="chart.png")
-    await message.answer_photo(
-        photo=photo, caption="📈 **Твой граф
+    photo = BufferedInputFile(buf
