@@ -4,6 +4,7 @@ import io
 import logging
 import random
 import sqlite3
+import os
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
@@ -21,6 +22,8 @@ import pandas as pd
 
 # 🔑 ТОКЕН ТВОЕГО TELEGRAM БОТА
 BOT_TOKEN = "8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s"
+TOKEN = os.getenv("8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s
+")
 
 logging.basicConfig(level=logging.INFO)
 
