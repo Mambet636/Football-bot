@@ -2,9 +2,10 @@ import asyncio
 from datetime import datetime
 import io
 import logging
+import os
 import random
 import sqlite3
-import os
+import sys
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
@@ -20,12 +21,10 @@ from aiogram.types import (
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# 🔑 ТОКЕН ТВОЕГО TELEGRAM БОТА
-BOT_TOKEN = "8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s"
-TOKEN = os.getenv("8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s
-")
+# 🔑 ТОКЕН БЕРЕТСЯ АВТОМАТИЧЕСКИ ИЗ НАСТРОЕК RAILWAY (Variables)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -108,7 +107,6 @@ def get_main_keyboard():
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    # Проверяем, есть ли профиль, если нет — создаем дефолтный
     user_id = message.from_user.id
     username = (
         message.from_user.username
@@ -306,14 +304,12 @@ def check_achievements(user_id):
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
 
-    # Матчи через бота
     cursor.execute(
         "SELECT COUNT(*), SUM(goals), MAX(goals), SUM(hours) FROM matches WHERE user_id = ?",
         (user_id,),
     )
     match_res = cursor.fetchone()
 
-    # Прошлые данные из профиля
     cursor.execute(
         "SELECT past_goals, past_matches, past_hours FROM profiles WHERE user_id = ?",
         (user_id,),
@@ -424,7 +420,6 @@ async def process_hours(message: types.Message, state: FSMContext):
         "INSERT INTO matches (user_id, username, date, goals, hours) VALUES (?, ?, ?, ?, ?)",
         (user_id, username, today, goals, hours),
     )
-    # Гарантируем наличие профиля
     cursor.execute(
         "INSERT OR IGNORE INTO profiles (user_id, username, position) VALUES (?, ?, ?)",
         (user_id, username, "Не указана"),
@@ -517,7 +512,6 @@ async def show_top_by_position(callback: types.CallbackQuery):
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
 
-    # Собираем общие голы (прошлые + бот) для каждого юзера со склейкой таблиц
     query = """
         SELECT 
             p.user_id, 
@@ -605,7 +599,6 @@ async def process_duel(callback: types.CallbackQuery):
         await callback.answer("❌ Игрок не найден.", show_alert=True)
         return
 
-    # Считаем итоговые цифры (прошлое + бот)
     t_name, t_pos, t_pg, t_pm, t_ph = t_profile
     t_bg, t_bh, t_bm = (
         t_matches_db if t_matches_db else (0, 0.0, 0)
@@ -656,4 +649,14 @@ async def select_match_to_delete(message: types.Message):
         "SELECT id, date, goals, hours FROM matches WHERE user_id = ? ORDER BY id DESC LIMIT 10",
         (user_id,),
     )
- 
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await message.answer(
+            "❌ Нет добавленных через бота матчей для удаления."
+        )
+        return
+
+    keyboard_buttons = []
+    for row in rows:
