@@ -3,32 +3,29 @@ import logging
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, F, types
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
-# 🔑 ТВОЙ ТОКЕН
+# 🔑 ВСТАВЬ СВОЙ ТОКЕН НИЖЕ
 TOKEN = "8236796974:AAGCq-RiXnh-Ui95Hm3xay-VpDje0k8X66s"
 
-# Включаем логирование, чтобы видеть в консоли всё, что происходит
 logging.basicConfig(level=logging.INFO)
 
-# Инициализируем бота и диспетчер
-bot = Bot(token=TOKEN)
+# Прокси для бесплатного тарифа PythonAnywhere
+session = AiohttpSession(proxy="http://proxy.server:3128")
+bot = Bot(token=TOKEN, session=session)
 dp = Dispatcher()
 
-# Хранилище игр (в памяти)
 stats = []
 
 
-# --- СОСТОЯНИЯ (FSM) ---
-# Асинхронные боты используют FSM (машину состояний), чтобы ждать ввод от юзера без лагов
 class GameForm(StatesGroup):
     waiting_for_goals = State()
 
 
-# --- КНОПКИ МЕНЮ ---
 def get_main_keyboard():
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -40,10 +37,6 @@ def get_main_keyboard():
     return keyboard
 
 
-# --- ХЭНДЛЕРЫ (ОБРАБОТЧИКИ) ---
-
-
-# 1. Старт
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -53,33 +46,29 @@ async def cmd_start(message: types.Message):
     )
 
 
-# 2. Нажали «Записать матч»
 @dp.message(F.text == "⚽ Записать матч")
 async def start_add_game(message: types.Message, state: FSMContext):
     await state.set_state(GameForm.waiting_for_goals)
     await message.answer("Сколько забил сегодня? Напиши цифру:")
 
 
-# 3. Приняли цифру голов
 @dp.message(GameForm.waiting_for_goals)
 async def process_goals(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("⚠️ Братан, введи просто число (например: 0, 2, 5):")
+        await message.answer("⚠️ Введи просто число (например: 0, 2, 5):")
         return
 
     goals = int(message.text)
     today = datetime.now().strftime("%d.%m.%Y")
-
     stats.append({"date": today, "goals": goals})
 
-    await state.clear()  # Сбрасываем состояние
+    await state.clear()
     await message.answer(
         f"✅ Принято! {today} — ⚽ {goals} голов.",
         reply_markup=get_main_keyboard(),
     )
 
 
-# 4. Статистика
 @dp.message(F.text == "📊 Статистика")
 async def show_stats(message: types.Message):
     if not stats:
@@ -100,7 +89,6 @@ async def show_stats(message: types.Message):
     await message.answer(text)
 
 
-# 5. История
 @dp.message(F.text == "📜 История")
 async def show_history(message: types.Message):
     if not stats:
@@ -114,7 +102,6 @@ async def show_history(message: types.Message):
     await message.answer(history_text)
 
 
-# --- ГЛАВНЫЙ АСИНХРОННЫЙ ЗАПУСК ---
 async def main():
     print("🚀 Асинхронный бот запущен!")
     await dp.start_polling(bot)
@@ -122,4 +109,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
     
