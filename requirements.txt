@@ -1,1 +1,6 @@
-aiogram>=3.0.0
+aiogram
+google-generativeai
+pandas
+matplotlib
+aiohttp
+
