@@ -21,7 +21,7 @@ import pandas as pd
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Впиши сюда свой Telegram ID цифрами (например: 123456789)
-ADMIN_ID = 8391762104
+ADMIN_ID = 0
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +59,8 @@ def init_db():
             past_saves INTEGER DEFAULT 0,
             past_conceded INTEGER DEFAULT 0,
             past_matches INTEGER DEFAULT 0,
-            past_hours REAL DEFAULT 0.0
+            past_hours REAL DEFAULT 0.0,
+            is_banned INTEGER DEFAULT 0
         )
     """)
     conn.commit()
@@ -80,6 +81,11 @@ class PastStatsForm(StatesGroup):
     waiting_for_past_stat2 = State()
     waiting_for_past_matches = State()
     waiting_for_past_hours = State()
+
+
+class AdminEditForm(StatesGroup):
+    waiting_for_target_id = State()
+    waiting_for_new_goals = State()
 
 
 def get_main_keyboard(is_admin=False):
@@ -107,8 +113,24 @@ def get_main_keyboard(is_admin=False):
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 
+# Проверка на бан перед выполнением действий
+async def check_ban(message: types.Message) -> bool:
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_banned FROM profiles WHERE user_id = ?", (message.from_user.id,))
+    res = cursor.fetchone()
+    conn.close()
+    if res and res[0] == 1:
+        await message.answer("⛔ Вы заблокированы администратором и не можете пользоваться ботом.")
+        return True
+    return False
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
+    if await check_ban(message):
+        return
+
     user_id = message.from_user.id
     username = (
         message.from_user.username
@@ -135,28 +157,15 @@ async def cmd_start(message: types.Message):
 
 @dp.message(F.text == "👤 Выбрать позицию")
 async def select_position(message: types.Message):
+    if await check_ban(message):
+        return
+
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="⚽ Нападающий", callback_data="pos_Нападающий"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🎯 Полузащитник", callback_data="pos_Полузащитник"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🛡️ Защитник", callback_data="pos_Защитник"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🧤 Вратарь", callback_data="pos_Вратарь"
-                )
-            ],
+            [InlineKeyboardButton(text="⚽ Нападающий", callback_data="pos_Нападающий")],
+            [InlineKeyboardButton(text="🎯 Полузащитник", callback_data="pos_Полузащитник")],
+            [InlineKeyboardButton(text="🛡️ Защитник", callback_data="pos_Защитник")],
+            [InlineKeyboardButton(text="🧤 Вратарь", callback_data="pos_Вратарь")],
         ]
     )
     await message.answer("Выбери свою основную позицию на поле:", reply_markup=keyboard)
@@ -183,6 +192,9 @@ async def process_position(callback: types.CallbackQuery):
 # --- ДОБАВЛЕНИЕ ПРОШЛОЙ СТАТИСТИКИ ---
 @dp.message(F.text == "📜 Добавить прошлую статистику")
 async def start_past_stats(message: types.Message, state: FSMContext):
+    if await check_ban(message):
+        return
+
     user_id = message.from_user.id
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
@@ -289,6 +301,9 @@ async def process_past_hours(message: types.Message, state: FSMContext):
 # --- ЗАПИСЬ НОВОГО МАТЧА ---
 @dp.message(F.text == "⚽ Записать матч")
 async def start_add_game(message: types.Message, state: FSMContext):
+    if await check_ban(message):
+        return
+
     user_id = message.from_user.id
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
@@ -380,16 +395,16 @@ async def process_hours(message: types.Message, state: FSMContext):
     conn.close()
 
     await state.clear()
-    await message.answer(
-        f"✅ **Матч успешно сохранен!**\n⏱️ Время: {hours} ч.",
-        reply_markup=get_main_keyboard(user_id == ADMIN_ID),
-        parse_mode="Markdown",
-    )
+    text_msg = "✅ Матч успешно сохранен!\n⏱️ Время: " + str(hours) + " ч."
+    await message.answer(text_msg, reply_markup=get_main_keyboard(user_id == ADMIN_ID))
 
 
 # --- ТЕКСТОВАЯ КАРТОЧКА ИГРОКА ---
 @dp.message(F.text == "🪪 Карточка игрока")
 async def show_player_card(message: types.Message):
+    if await check_ban(message):
+        return
+
     user_id = message.from_user.id
     name = message.from_user.first_name
 
@@ -422,6 +437,7 @@ async def show_player_card(message: types.Message):
             f" 🧤 **ВРАТАРСКАЯ КАРТОЧКА** 🧤\n"
             f"╚═══════════════════════╝\n\n"
             f"👤 Игрок: **{name}**\n"
+            f"🆔 ID: `{user_id}`\n"
             f"📍 Позиция: **{pos}**\n\n"
             f"📊 **СТАТИСТИКА:**\n"
             f"• Сейвы (🧤): **{total_saves}**\n"
@@ -440,6 +456,7 @@ async def show_player_card(message: types.Message):
             f" ⚡ **ФУТБОЛЬНАЯ КАРТОЧКА** ⚡\n"
             f"╚═══════════════════════╝\n\n"
             f"👤 Игрок: **{name}**\n"
+            f"🆔 ID: `{user_id}`\n"
             f"📍 Позиция: **{pos}**\n\n"
             f"📊 **СТАТИСТИКА (Г + П):**\n"
             f"• Голы (⚽): **{total_goals}**\n"
@@ -457,15 +474,19 @@ async def show_player_card(message: types.Message):
 # --- ТАБЛИЦА ЛИДЕРОВ ---
 @dp.message(F.text == "🏆 Таблица лидеров")
 async def show_leaderboard(message: types.Message):
+    if await check_ban(message):
+        return
+
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT p.username, p.position,
+        SELECT p.user_id, p.username, p.position,
                (COALESCE(p.past_goals, 0) + COALESCE(p.past_assists, 0) + 
                 COALESCE(SUM(m.goals), 0) + COALESCE(SUM(m.assists), 0)) as impact,
                (COALESCE(p.past_saves, 0) + COALESCE(SUM(m.saves), 0)) as saves
         FROM profiles p
         LEFT JOIN matches m ON p.user_id = m.user_id
+        WHERE p.is_banned = 0
         GROUP BY p.user_id ORDER BY impact DESC, saves DESC LIMIT 10
     """)
     rows = cursor.fetchall()
@@ -477,20 +498,23 @@ async def show_leaderboard(message: types.Message):
 
     text = "🏆 **ТОП-10 ИГРОКОВ КОКШЕТАУ:**\n\n"
     for i, r in enumerate(rows):
-        uname, position, imp, sav = r
+        uid, uname, position, imp, sav = r
         if position == "Вратарь":
-            text += f"{i+1}. 🧤 **{uname}** — **{sav}** сейвов (Вратарь)\n"
+            text += f"{i+1}. 🧤 **{uname}** (ID: `{uid}`) — **{sav}** сейвов\n"
         else:
-            text += f"{i+1}. ⚽ **{uname}** — **{imp}** очков Г+П ({position})\n"
+            text += f"{i+1}. ⚽ **{uname}** (ID: `{uid}`) — **{imp}** очков Г+П\n"
 
     await message.answer(text, parse_mode="Markdown")
 
 
 @dp.message(F.text == "🌍 Статистика сообщества")
 async def show_global(message: types.Message):
+    if await check_ban(message):
+        return
+
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT SUM(past_goals), SUM(past_assists), SUM(past_saves), SUM(past_matches), SUM(past_hours) FROM profiles")
+    cursor.execute("SELECT SUM(past_goals), SUM(past_assists), SUM(past_saves), SUM(past_matches), SUM(past_hours) FROM profiles WHERE is_banned = 0")
     pg, pa, ps, pm, ph = cursor.fetchone()
     cursor.execute("SELECT SUM(goals), SUM(assists), SUM(saves), COUNT(id), SUM(hours) FROM matches")
     bg, ba, bs, bm, bh = cursor.fetchone()
@@ -515,6 +539,9 @@ async def show_global(message: types.Message):
 
 @dp.message(F.text == "🎯 Челлендж дня")
 async def challenge(message: types.Message):
+    if await check_ban(message):
+        return
+
     ex = [
         "Сделай 50 передач в стену правой ногой",
         "Сделай 50 передач в стену левой ногой",
@@ -527,6 +554,9 @@ async def challenge(message: types.Message):
 # --- УДАЛЕНИЕ МАТЧА ---
 @dp.message(F.text == "🗑️ Удалить матч")
 async def del_match(message: types.Message):
+    if await check_ban(message):
+        return
+
     user_id = message.from_user.id
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
@@ -565,35 +595,8 @@ async def remove_match(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# --- АДМИН-ПАНЕЛЬ ---
+# --- АДМИН-ПАНЕЛЬ С БАНАМИ И УДАЛЕНИЕМ ГОЛОВ ---
 @dp.message(F.text == "🛡️ Админ-панель")
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-        await message.answer("У тебя нет доступа к этой панели.")
-        return
-
-    conn = sqlite3.connect("football_bot.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM profiles")
-    users_count = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(id) FROM matches")
-    matches_count = cursor.fetchone()[0]
-    conn.close()
-
-    await message.answer(
-        f"🛡️ **ПАНЕЛЬ АДМИНИСТРАТОРА**\n\n"
-        f"👥 Всего игроков в базе: **{users_count}**\n"
-        f"⚽ Всего записанных матчей: **{matches_count}**\n\n"
-        f"Система работает в штатном режиме, защита от накрутки активна.",
-        parse_mode="Markdown",
-    )
-
-
-async def main():
-    print("Bot started successfully")
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-    
+       
