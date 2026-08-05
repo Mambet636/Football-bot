@@ -5,6 +5,7 @@ import os
 import random
 import sqlite3
 import sys
+import threading
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
@@ -16,11 +17,12 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
-import pandas as pd
+from flask import Flask
 
-BOT_TOKEN = ("8236796974:AAHLCK-e8-9YpYrWZUEaWlW_e2WWddn6kSo")
+# Вставь свой токен прямо сюда в кавычки:
+BOT_TOKEN = "ТВОЙ_ТОКЕН_ЗДЕСЬ"
 
-# Впиши сюда свой Telegram ID цифрами (например: 123456789)
+# Впиши сюда свой Telegram ID цифрами
 ADMIN_ID = 0
 
 logging.basicConfig(
@@ -31,6 +33,19 @@ logging.basicConfig(
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# Простейший веб-сервер для Railway, чтобы контейнер не спал
+app = Flask(__name__)
+
+
+@app.route("/")
+def index():
+    return "Football Bot is running!"
+
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 
 def init_db():
@@ -589,10 +604,4 @@ async def remove_match(callback: types.CallbackQuery):
 
 @dp.message(F.text == "🛡️ Админ-панель")
 async def admin_panel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("У тебя нет доступа к этой панели.")
-        return
-
-    b_btn = InlineKeyboardButton(text="🔨 Забанить игрока (ЧС)", callback_data="adm_ban")
-    u_btn = InlineKeyboardButton(text="🔓 Разбанить игрока", callback_data="adm_unban")
-    r_b
+    if message.fr
