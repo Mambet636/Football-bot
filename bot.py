@@ -6,6 +6,7 @@ import os
 import random
 import sqlite3
 import sys
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
@@ -27,7 +28,7 @@ import pandas as pd
 # 🔑 ТОКЕН БЕРЕТСЯ АВТОМАТИЧЕСКИ ИЗ НАСТРОЕК RAILWAY (Variables)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Настройка логирования с мгновенным сбросом буфера, чтобы логи не висели на сервере
+# Настройка логирования с мгновенным выводом
 logging.basicConfig(
     level=logging.INFO,
     stream=sys.stdout,
@@ -661,4 +662,4 @@ async def show_chart(message: types.Message):
     plt.tight_layout()
 
     buf = io.BytesIO()
-       
+    plt.savefig(b
