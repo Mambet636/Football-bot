@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime
-import io
 import logging
 import os
 import random
@@ -17,7 +16,6 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
-from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -130,7 +128,7 @@ async def cmd_start(message: types.Message):
     is_admin = user_id == ADMIN_ID
     await message.answer(
         f"Привет, {message.from_user.first_name}! ⚽🔥\n\n"
-        "Футбольный трекер Кокшетау активирован. Фиксируй матчи, качай свою FIFA-карточку и пробивайся в топ города!",
+        "Футбольный трекер Кокшетау активирован. Фиксируй матчи, качай свою карточку и пробивайся в топ города!",
         reply_markup=get_main_keyboard(is_admin),
     )
 
@@ -382,44 +380,14 @@ async def process_hours(message: types.Message, state: FSMContext):
     conn.close()
 
     await state.clear()
-    
-    # Исправленный блок отправки без разрывов строк в скобках
-    text_msg = "✅ Матч успешно сохранен!\n⏱️ Время: " + str(hours) + " ч."
-    await message.answer(text_msg, reply_markup=get_main_keyboard(user_id == ADMIN_ID))
+    await message.answer(
+        f"✅ **Матч успешно сохранен!**\n⏱️ Время: {hours} ч.",
+        reply_markup=get_main_keyboard(user_id == ADMIN_ID),
+        parse_mode="Markdown",
+    )
 
 
-# --- ГЕНЕРАЦИЯ КАРТОЧКИ FIFA (КАРТИНКА) ---
-def generate_fifa_card(name, pos, rank_title, stat1_name, stat1_val, stat2_name, stat2_val, matches, hours):
-    img = Image.new("RGB", (600, 800), color=(20, 24, 33))
-    draw = ImageDraw.Draw(img)
-
-    draw.rectangle([20, 20, 580, 780], outline=(212, 175, 55), width=6)
-    draw.rectangle([30, 30, 570, 770], outline=(40, 48, 68), width=3)
-
-    overall_rating = min(94, 65 + (stat1_val * 2) + matches)
-
-    draw.text((60, 60), str(overall_rating), fill=(255, 215, 0))
-    draw.text((60, 100), pos.upper()[:4], fill=(255, 255, 255))
-
-    draw.text((60, 260), name[:15].upper(), fill=(255, 255, 255))
-    draw.text((60, 290), f" РАНГ: {rank_title} ", fill=(200, 200, 200))
-
-    draw.line([60, 340, 540, 340], fill=(212, 175, 55), width=2)
-
-    draw.text((60, 380), f"{stat1_name}: {stat1_val}", fill=(255, 255, 255))
-    draw.text((60, 440), f"{stat2_name}: {stat2_val}", fill=(255, 255, 255))
-    draw.text((60, 500), f"МАТЧИ: {matches}", fill=(255, 255, 255))
-    draw.text((60, 560), f"НАИГРАНО ЧАСОВ: {hours:.1f} ч.", fill=(255, 255, 255))
-
-    draw.text((60, 680), "KOKSHETAU FOOTBALL LEAGUE", fill=(150, 150, 150))
-
-    bio = io.BytesIO()
-    bio.name = "card.png"
-    img.save(bio, "PNG")
-    bio.seek(0)
-    return bio
-
-
+# --- ТЕКСТОВАЯ КАРТОЧКА ИГРОКА ---
 @dp.message(F.text == "🪪 Карточка игрока")
 async def show_player_card(message: types.Message):
     user_id = message.from_user.id
@@ -447,23 +415,43 @@ async def show_player_card(message: types.Message):
     total_hours = (ph or 0.0) + (bh or 0.0)
 
     if pos == "Вратарь":
-        s1_name, s1_val = "СЕЙВЫ", (ps or 0) + (bs or 0)
-        s2_name, s2_val = "ПРОПУЩЕНО", (pc or 0) + (bc or 0)
-        rank = "Страж ворот" if s1_val > 20 else "Новичок-вратарь"
+        total_saves = (ps or 0) + (bs or 0)
+        total_conceded = (pc or 0) + (bc or 0)
+        card_text = (
+            f"╔═══════════════════════╗\n"
+            f" 🧤 **ВРАТАРСКАЯ КАРТОЧКА** 🧤\n"
+            f"╚═══════════════════════╝\n\n"
+            f"👤 Игрок: **{name}**\n"
+            f"📍 Позиция: **{pos}**\n\n"
+            f"📊 **СТАТИСТИКА:**\n"
+            f"• Сейвы (🧤): **{total_saves}**\n"
+            f"• Пропущенные (🥅): **{total_conceded}**\n\n"
+            f"👟 Сыграно матчей: **{total_matches}**\n"
+            f"⏱️ Наиграно времени: **{total_hours:.1f} ч.**\n"
+            f"🏙️ Город: **Кокшетау**\n"
+            f"─────────────────────────"
+        )
     else:
-        goals = (pg or 0) + (bg or 0)
-        assists = (pa or 0) + (ba or 0)
-        s1_name, s1_val = "ГОЛЫ", goals
-        s2_name, s2_val = "АССИСТЫ", assists
-        impact = goals + assists
-        rank = "Легенда" if impact > 100 else ("Профессионал" if impact > 40 else "Новичок")
+        total_goals = (pg or 0) + (bg or 0)
+        total_assists = (pa or 0) + (ba or 0)
+        impact = total_goals + total_assists
+        card_text = (
+            f"╔═══════════════════════╗\n"
+            f" ⚡ **ФУТБОЛЬНАЯ КАРТОЧКА** ⚡\n"
+            f"╚═══════════════════════╝\n\n"
+            f"👤 Игрок: **{name}**\n"
+            f"📍 Позиция: **{pos}**\n\n"
+            f"📊 **СТАТИСТИКА (Г + П):**\n"
+            f"• Голы (⚽): **{total_goals}**\n"
+            f"• Ассисты (🤝): **{total_assists}**\n"
+            f"• Общий импакт: **{impact} очков**\n\n"
+            f"👟 Сыграно матчей: **{total_matches}**\n"
+            f"⏱️ Наиграно времени: **{total_hours:.1f} ч.**\n"
+            f"🏙️ Город: **Кокшетау**\n"
+            f"─────────────────────────"
+        )
 
-    photo_bio = generate_fifa_card(name, pos, rank, s1_name, s1_val, s2_name, s2_val, total_matches, total_hours)
-    
-    await message.answer_photo(
-        photo=types.BufferedInputFile(photo_bio.read(), filename="card.png"),
-        caption="🪪 Твоя официальная карточка игрока Кокшетау!",
-    )
+    await message.answer(card_text, parse_mode="Markdown")
 
 
 # --- ТАБЛИЦА ЛИДЕРОВ ---
@@ -590,4 +578,22 @@ async def admin_panel(message: types.Message):
     users_count = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(id) FROM matches")
     matches_count = cursor.fetchone()[0]
-   
+    conn.close()
+
+    await message.answer(
+        f"🛡️ **ПАНЕЛЬ АДМИНИСТРАТОРА**\n\n"
+        f"👥 Всего игроков в базе: **{users_count}**\n"
+        f"⚽ Всего записанных матчей: **{matches_count}**\n\n"
+        f"Система работает в штатном режиме, защита от накрутки активна.",
+        parse_mode="Markdown",
+    )
+
+
+async def main():
+    print("Bot started successfully")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
