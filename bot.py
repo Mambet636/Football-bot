@@ -159,14 +159,12 @@ async def select_position(message: types.Message):
     if await check_ban(message):
         return
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="⚽ Нападающий", callback_data="pos_Нападающий")],
-            [InlineKeyboardButton(text="🎯 Полузащитник", callback_data="pos_Полузащитник")],
-            [InlineKeyboardButton(text="🛡️ Защитник", callback_data="pos_Защитник")],
-            [InlineKeyboardButton(text="🧤 Вратарь", callback_data="pos_Вратарь")],
-        ]
-    )
+    btn1 = InlineKeyboardButton(text="⚽ Нападающий", callback_data="pos_Нападающий")
+    btn2 = InlineKeyboardButton(text="🎯 Полузащитник", callback_data="pos_Полузащитник")
+    btn3 = InlineKeyboardButton(text="🛡️ Защитник", callback_data="pos_Защитник")
+    btn4 = InlineKeyboardButton(text="🧤 Вратарь", callback_data="pos_Вратарь")
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[btn1], [btn2], [btn3], [btn4]])
     await message.answer("Выбери свою основную позицию на поле:", reply_markup=keyboard)
 
 
@@ -595,7 +593,6 @@ async def admin_panel(message: types.Message):
         await message.answer("У тебя нет доступа к этой панели.")
         return
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🔨 Забанить игрока (ЧС)", callback_data="adm_ban")],
-            [InlineKe
+    b_btn = InlineKeyboardButton(text="🔨 Забанить игрока (ЧС)", callback_data="adm_ban")
+    u_btn = InlineKeyboardButton(text="🔓 Разбанить игрока", callback_data="adm_unban")
+    r_b
