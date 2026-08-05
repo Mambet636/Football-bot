@@ -18,7 +18,7 @@ from aiogram.types import (
 )
 import pandas as pd
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("8236796974:AAHLCK-e8-9YpYrWZUEaWlW_e2WWddn6kSo")
 
 # Впиши сюда свой Telegram ID цифрами (например: 123456789)
 ADMIN_ID = 0
