@@ -21,7 +21,7 @@ import pandas as pd
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Впиши сюда свой Telegram ID цифрами (например: 123456789)
-ADMIN_ID = 0
+ADMIN_ID = 8391762104
 
 logging.basicConfig(
     level=logging.INFO,
