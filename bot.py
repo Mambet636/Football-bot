@@ -22,8 +22,8 @@ import pandas as pd
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Твой Telegram ID как главного администратора (можешь поменять при необходимости)
-ADMIN_ID = 8391762104  # Сюда автоматически подтянется или можно вписать твой ID
+# Впиши сюда свой Telegram ID цифрами (например: 123456789)
+ADMIN_ID = 0
 
 logging.basicConfig(
     level=logging.INFO,
@@ -288,7 +288,7 @@ async def process_past_hours(message: types.Message, state: FSMContext):
     )
 
 
-# --- ЗАПИСЬ НОВОГО МАТЧА (С ЗАЩИТОЙ ОТ НАКРУТКИ) ---
+# --- ЗАПИСЬ НОВОГО МАТЧА ---
 @dp.message(F.text == "⚽ Записать матч")
 async def start_add_game(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -314,7 +314,6 @@ async def process_stat1(message: types.Message, state: FSMContext):
         await message.answer("Введи целое число:")
         return
     val1 = int(message.text)
-    # Защита от бредовой накрутки
     if val1 > 20:
         await message.answer("⚠️ Слишком большое число для одного матча! Введи реальное значение:")
         return
@@ -392,41 +391,29 @@ async def process_hours(message: types.Message, state: FSMContext):
 
 # --- ГЕНЕРАЦИЯ КАРТОЧКИ FIFA (КАРТИНКА) ---
 def generate_fifa_card(name, pos, rank_title, stat1_name, stat1_val, stat2_name, stat2_val, matches, hours):
-    # Создаем холст под вертикальную карточку FIFA
     img = Image.new("RGB", (600, 800), color=(20, 24, 33))
     draw = ImageDraw.Draw(img)
 
-    # Рисуем стильную золотисто-градиентную рамку карточки
     draw.rectangle([20, 20, 580, 780], outline=(212, 175, 55), width=6)
     draw.rectangle([30, 30, 570, 770], outline=(40, 48, 68), width=3)
 
-    # Загрузка стандартного шрифта (встроенного в Pillow)
-    font_large = ImageFont.load_default()
-
-    # Общий рейтинг (допустим, на основе импакта или матчей)
     overall_rating = min(94, 65 + (stat1_val * 2) + matches)
 
-    # Верхняя часть карточки: Рейтинг и Позиция
     draw.text((60, 60), str(overall_rating), fill=(255, 215, 0))
     draw.text((60, 100), pos.upper()[:4], fill=(255, 255, 255))
 
-    # Имя игрока
     draw.text((60, 260), name[:15].upper(), fill=(255, 255, 255))
     draw.text((60, 290), f" РАНГ: {rank_title} ", fill=(200, 200, 200))
 
-    # Разделительная линия
     draw.line([60, 340, 540, 340], fill=(212, 175, 55), width=2)
 
-    # Статистика на карточке
     draw.text((60, 380), f"{stat1_name}: {stat1_val}", fill=(255, 255, 255))
     draw.text((60, 440), f"{stat2_name}: {stat2_val}", fill=(255, 255, 255))
     draw.text((60, 500), f"МАТЧИ: {matches}", fill=(255, 255, 255))
     draw.text((60, 560), f"НАИГРАНО ЧАСОВ: {hours:.1f} ч.", fill=(255, 255, 255))
 
-ция
     draw.text((60, 680), "KOKSHETAU FOOTBALL LEAGUE", fill=(150, 150, 150))
 
-    # Сохраняем в байты без сохранения файла на диск
     bio = io.BytesIO()
     bio.name = "card.png"
     img.save(bio, "PNG")
@@ -472,12 +459,11 @@ async def show_player_card(message: types.Message):
         impact = goals + assists
         rank = "Легенда" if impact > 100 else ("Профессионал" if impact > 40 else "Новичок")
 
-    # Генерируем картинку карточки
     photo_bio = generate_fifa_card(name, pos, rank, s1_name, s1_val, s2_name, s2_val, total_matches, total_hours)
     
     await message.answer_photo(
         photo=types.BufferedInputFile(photo_bio.read(), filename="card.png"),
-        caption=f"🪪 Твоя официальная карточка игрока Кокшетау!",
+        caption="🪪 Твоя официальная карточка игрока Кокшетау!",
     )
 
 
@@ -588,4 +574,24 @@ async def remove_match(callback: types.CallbackQuery):
     cursor.execute("DELETE FROM matches WHERE id = ? AND user_id = ?", (m_id, callback.from_user.id))
     conn.commit()
     conn.close()
-    await call
+    await callback.message.edit_text("🗑️ Матч удален!")
+    await callback.answer()
+
+
+# --- АДМИН-ПАНЕЛЬ ---
+@dp.message(F.text == "🛡️ Админ-панель")
+async def admin_panel(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("У тебя нет доступа к этой панели.")
+        return
+
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM profiles")
+    users_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(id) FROM matches")
+    matches_count = cursor.fetchone()[0]
+    conn.close()
+
+    await message.answer(
+  
