@@ -113,7 +113,6 @@ def get_main_keyboard(is_admin=False):
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 
-# Проверка на бан перед выполнением действий
 async def check_ban(message: types.Message) -> bool:
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
@@ -189,7 +188,6 @@ async def process_position(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# --- ДОБАВЛЕНИЕ ПРОШЛОЙ СТАТИСТИКИ ---
 @dp.message(F.text == "📜 Добавить прошлую статистику")
 async def start_past_stats(message: types.Message, state: FSMContext):
     if await check_ban(message):
@@ -298,7 +296,6 @@ async def process_past_hours(message: types.Message, state: FSMContext):
     )
 
 
-# --- ЗАПИСЬ НОВОГО МАТЧА ---
 @dp.message(F.text == "⚽ Записать матч")
 async def start_add_game(message: types.Message, state: FSMContext):
     if await check_ban(message):
@@ -399,7 +396,6 @@ async def process_hours(message: types.Message, state: FSMContext):
     await message.answer(text_msg, reply_markup=get_main_keyboard(user_id == ADMIN_ID))
 
 
-# --- ТЕКСТОВАЯ КАРТОЧКА ИГРОКА ---
 @dp.message(F.text == "🪪 Карточка игрока")
 async def show_player_card(message: types.Message):
     if await check_ban(message):
@@ -471,7 +467,6 @@ async def show_player_card(message: types.Message):
     await message.answer(card_text, parse_mode="Markdown")
 
 
-# --- ТАБЛИЦА ЛИДЕРОВ ---
 @dp.message(F.text == "🏆 Таблица лидеров")
 async def show_leaderboard(message: types.Message):
     if await check_ban(message):
@@ -551,7 +546,6 @@ async def challenge(message: types.Message):
     await message.answer(f"🎯 **Челлендж на сегодня:**\n\n👉 *{random.choice(ex)}*", parse_mode="Markdown")
 
 
-# --- УДАЛЕНИЕ МАТЧА ---
 @dp.message(F.text == "🗑️ Удалить матч")
 async def del_match(message: types.Message):
     if await check_ban(message):
@@ -595,8 +589,13 @@ async def remove_match(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# --- АДМИН-ПАНЕЛЬ С БАНАМИ И УДАЛЕНИЕМ ГОЛОВ ---
 @dp.message(F.text == "🛡️ Админ-панель")
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-       
+        await message.answer("У тебя нет доступа к этой панели.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔨 Забанить игрока (ЧС)", callback_data="adm_ban")],
+            [InlineKe
