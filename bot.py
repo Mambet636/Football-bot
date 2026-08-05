@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime
-import io
 import logging
 import os
 import random
@@ -13,17 +12,11 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    BufferedInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import pandas as pd
 
 # 🔑 ТОКЕН БЕРЕТСЯ АВТОМАТИЧЕСКИ ИЗ НАСТРОЕК RAILWAY (Variables)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -100,13 +93,10 @@ def get_main_keyboard():
                 KeyboardButton(text="🎖️ Мои достижения"),
             ],
             [
-                KeyboardButton(text="📈 График прогресса"),
                 KeyboardButton(text="🎯 Челлендж дня"),
-            ],
-            [
                 KeyboardButton(text="🗑️ Удалить матч"),
-                KeyboardButton(text="🌍 Статистика сообщества"),
             ],
+            [KeyboardButton(text="🌍 Статистика сообщества")],
         ],
         resize_keyboard=True,
     )
@@ -633,33 +623,34 @@ async def show_global_stats(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-# --- ГРАФИК ПРОГРЕССА ---
-@dp.message(F.text == "📈 График прогресса")
-async def show_chart(message: types.Message):
-    user_id = message.from_user.id
-    conn = sqlite3.connect("football_bot.db")
-    df = pd.read_sql_query(
-        "SELECT date, goals FROM matches WHERE user_id = ?",
-        conn,
-        params=(user_id,),
+# --- ЧЕЛЛЕНДЖ ДНЯ ---
+@dp.message(F.text == "🎯 Челлендж дня")
+async def daily_challenge(message: types.Message):
+    actions = ["Сделай", "Выполни", "Отработай"]
+    counts = ["30", "50", "100"]
+    exercises = [
+        "передач в стенку правой ногой",
+        "передач в стенку левой ногой",
+        "челночных рывков по 30 метров",
+    ]
+    challenge_text = (
+        f"🎯 **ЧЕЛЛЕНДЖ НА СЕГОДНЯ:**\n\n"
+        f"👉 *{random.choice(actions)} {random.choice(counts)} {random.choice(exercises)}*"
     )
-    conn.close()
+    await message.answer(challenge_text, parse_mode="Markdown")
 
-    if df.empty:
-        await message.answer("📈 Запиши хотя бы пару матчей через бота!")
-        return
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(
-        range(len(df)),
-        df["goals"],
-        marker="o",
-        color="#2ecc71",
-        linewidth=2,
-        markersize=8,
-    )
-    plt.title("Динамика результатов", fontsize=14, fontweight="bold")
-    plt.tight_layout()
+# --- МИНИ-СЕРВЕР ДЛЯ RAILWAY ---
+async def handle(request):
+    return web.Response(text="Bot is running!")
 
-    buf = io.BytesIO()
-    plt.savefig(b
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"🌐 Веб-сервер запущен на порту {port}", flu
