@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+import io
 import logging
 import os
 import random
@@ -16,9 +17,13 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
+from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Твой Telegram ID как главного администратора (можешь поменять при необходимости)
+ADMIN_ID = 8391762104  # Сюда автоматически подтянется или можно вписать твой ID
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,7 +38,6 @@ dp = Dispatcher()
 def init_db():
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
-    # Добавили поля для вратарей: saves (сейвы) и conceded (пропущенные)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS matches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,8 +72,8 @@ init_db()
 
 
 class GameForm(StatesGroup):
-    waiting_for_stat1 = State()  # Голы для полевых / Сейвы для вратаря
-    waiting_for_stat2 = State()  # Ассисты для полевых / Пропущенные для вратаря
+    waiting_for_stat1 = State()
+    waiting_for_stat2 = State()
     waiting_for_hours = State()
 
 
@@ -80,28 +84,29 @@ class PastStatsForm(StatesGroup):
     waiting_for_past_hours = State()
 
 
-def get_main_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="⚽ Записать матч"),
-                KeyboardButton(text="📜 Добавить прошлую статистику"),
-            ],
-            [
-                KeyboardButton(text="🪪 Карточка игрока"),
-                KeyboardButton(text="👤 Выбрать позицию"),
-            ],
-            [
-                KeyboardButton(text="🏆 Таблица лидеров"),
-                KeyboardButton(text="🎯 Челлендж дня"),
-            ],
-            [
-                KeyboardButton(text="🗑️ Удалить матч"),
-                KeyboardButton(text="🌍 Статистика сообщества"),
-            ],
+def get_main_keyboard(is_admin=False):
+    kb = [
+        [
+            KeyboardButton(text="⚽ Записать матч"),
+            KeyboardButton(text="📜 Добавить прошлую статистику"),
         ],
-        resize_keyboard=True,
-    )
+        [
+            KeyboardButton(text="🪪 Карточка игрока"),
+            KeyboardButton(text="👤 Выбрать позицию"),
+        ],
+        [
+            KeyboardButton(text="🏆 Таблица лидеров"),
+            KeyboardButton(text="🎯 Челлендж дня"),
+        ],
+        [
+            KeyboardButton(text="🗑️ Удалить матч"),
+            KeyboardButton(text="🌍 Статистика сообщества"),
+        ],
+    ]
+    if is_admin:
+        kb.append([KeyboardButton(text="🛡️ Админ-панель")])
+
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 
 @dp.message(CommandStart())
@@ -122,11 +127,11 @@ async def cmd_start(message: types.Message):
     conn.commit()
     conn.close()
 
+    is_admin = user_id == ADMIN_ID
     await message.answer(
         f"Привет, {message.from_user.first_name}! ⚽🔥\n\n"
-        "Футбольный трекер Кокшетау готов! Полевые игроки считают голы и ассисты, а вратари — сейвы и пропущенные.\n\n"
-        "Выбирай действие в меню:",
-        reply_markup=get_main_keyboard(),
+        "Футбольный трекер Кокшетау активирован. Фиксируй матчи, качай свою FIFA-карточку и пробивайся в топ города!",
+        reply_markup=get_main_keyboard(is_admin),
     )
 
 
@@ -192,9 +197,9 @@ async def start_past_stats(message: types.Message, state: FSMContext):
     await state.set_state(PastStatsForm.waiting_for_past_stat1)
 
     if pos == "Вратарь":
-        await message.answer("📜 **Прошлые заслуги**\n\nСколько всего **сейвов** ты сделал до этого?")
+        await message.answer("📜 Сколько всего **сейвов** ты сделал до этого?")
     else:
-        await message.answer("📜 **Прошлые заслуги**\n\nСколько всего **голов** ты забил до этого?")
+        await message.answer("📜 Сколько всего **голов** ты забил до этого?")
 
 
 @dp.message(PastStatsForm.waiting_for_past_stat1)
@@ -204,10 +209,9 @@ async def process_past_stat1(message: types.Message, state: FSMContext):
         return
     await state.update_data(val1=int(message.text))
     data = await state.get_data()
-
     await state.set_state(PastStatsForm.waiting_for_past_stat2)
     if data["position"] == "Вратарь":
-        await message.answer("🥅 Сколько всего мячей ты **пропустил** до этого?")
+        await message.answer("🥅 Сколько мячей ты **пропустил** до этого?")
     else:
         await message.answer("🤝 Сколько всего **ассистов** отдал до этого?")
 
@@ -278,10 +282,13 @@ async def process_past_hours(message: types.Message, state: FSMContext):
     conn.close()
 
     await state.clear()
-    await message.answer("✅ Прошлые данные успешно сохранены!", reply_markup=get_main_keyboard())
+    await message.answer(
+        "✅ Прошлые данные успешно сохранены!",
+        reply_markup=get_main_keyboard(user_id == ADMIN_ID),
+    )
 
 
-# --- ЗАПИСЬ НОВОГО МАТЧА ---
+# --- ЗАПИСЬ НОВОГО МАТЧА (С ЗАЩИТОЙ ОТ НАКРУТКИ) ---
 @dp.message(F.text == "⚽ Записать матч")
 async def start_add_game(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -306,7 +313,12 @@ async def process_stat1(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Введи целое число:")
         return
-    await state.update_data(val1=int(message.text))
+    val1 = int(message.text)
+    # Защита от бредовой накрутки
+    if val1 > 20:
+        await message.answer("⚠️ Слишком большое число для одного матча! Введи реальное значение:")
+        return
+    await state.update_data(val1=val1)
     data = await state.get_data()
 
     await state.set_state(GameForm.waiting_for_stat2)
@@ -321,9 +333,13 @@ async def process_stat2(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Введи целое число:")
         return
-    await state.update_data(val2=int(message.text))
+    val2 = int(message.text)
+    if val2 > 20:
+        await message.answer("⚠️ Слишком большое число! Введи реальное значение:")
+        return
+    await state.update_data(val2=val2)
     await state.set_state(GameForm.waiting_for_hours)
-    await message.answer("⏱️ Сколько часов длился матч/тренировка?")
+    await message.answer("⏱️ Сколько часов длился матч/тренировка? (например: 1.5)")
 
 
 @dp.message(GameForm.waiting_for_hours)
@@ -367,15 +383,57 @@ async def process_hours(message: types.Message, state: FSMContext):
     conn.close()
 
     await state.clear()
-    if pos == "Вратарь":
-        text = f"✅ **Матч сохранен!**\n🧤 Сейвы: {v1}\n🥅 Пропущено: {v2}\n⏱️ Время: {hours} ч."
-    else:
-        text = f"✅ **Матч сохранен!**\n⚽ Голы: {v1}\n🤝 Ассисты: {v2}\n⏱️ Время: {hours} ч."
+    await message.answer(
+        f"✅ **Матч успешно сохранен!**\n⏱️ Время: {hours} ч.",
+        reply_markup=get_main_keyboard(user_id == ADMIN_ID),
+        parse_mode="Markdown",
+    )
 
-    await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+
+# --- ГЕНЕРАЦИЯ КАРТОЧКИ FIFA (КАРТИНКА) ---
+def generate_fifa_card(name, pos, rank_title, stat1_name, stat1_val, stat2_name, stat2_val, matches, hours):
+    # Создаем холст под вертикальную карточку FIFA
+    img = Image.new("RGB", (600, 800), color=(20, 24, 33))
+    draw = ImageDraw.Draw(img)
+
+    # Рисуем стильную золотисто-градиентную рамку карточки
+    draw.rectangle([20, 20, 580, 780], outline=(212, 175, 55), width=6)
+    draw.rectangle([30, 30, 570, 770], outline=(40, 48, 68), width=3)
+
+    # Загрузка стандартного шрифта (встроенного в Pillow)
+    font_large = ImageFont.load_default()
+
+    # Общий рейтинг (допустим, на основе импакта или матчей)
+    overall_rating = min(94, 65 + (stat1_val * 2) + matches)
+
+    # Верхняя часть карточки: Рейтинг и Позиция
+    draw.text((60, 60), str(overall_rating), fill=(255, 215, 0))
+    draw.text((60, 100), pos.upper()[:4], fill=(255, 255, 255))
+
+    # Имя игрока
+    draw.text((60, 260), name[:15].upper(), fill=(255, 255, 255))
+    draw.text((60, 290), f" РАНГ: {rank_title} ", fill=(200, 200, 200))
+
+    # Разделительная линия
+    draw.line([60, 340, 540, 340], fill=(212, 175, 55), width=2)
+
+    # Статистика на карточке
+    draw.text((60, 380), f"{stat1_name}: {stat1_val}", fill=(255, 255, 255))
+    draw.text((60, 440), f"{stat2_name}: {stat2_val}", fill=(255, 255, 255))
+    draw.text((60, 500), f"МАТЧИ: {matches}", fill=(255, 255, 255))
+    draw.text((60, 560), f"НАИГРАНО ЧАСОВ: {hours:.1f} ч.", fill=(255, 255, 255))
+
+ция
+    draw.text((60, 680), "KOKSHETAU FOOTBALL LEAGUE", fill=(150, 150, 150))
+
+    # Сохраняем в байты без сохранения файла на диск
+    bio = io.BytesIO()
+    bio.name = "card.png"
+    img.save(bio, "PNG")
+    bio.seek(0)
+    return bio
 
 
-# --- КАРТОЧКА ИГРОКА ---
 @dp.message(F.text == "🪪 Карточка игрока")
 async def show_player_card(message: types.Message):
     user_id = message.from_user.id
@@ -388,7 +446,6 @@ async def show_player_card(message: types.Message):
         (user_id,),
     )
     prof = cursor.fetchone()
-    
     cursor.execute(
         "SELECT SUM(goals), SUM(assists), SUM(saves), SUM(conceded), SUM(hours), COUNT(id) FROM matches WHERE user_id = ?",
         (user_id,),
@@ -404,43 +461,24 @@ async def show_player_card(message: types.Message):
     total_hours = (ph or 0.0) + (bh or 0.0)
 
     if pos == "Вратарь":
-        total_saves = (ps or 0) + (bs or 0)
-        total_conceded = (pc or 0) + (bc or 0)
-        card_text = (
-            f"╔═══════════════════════╗\n"
-            f" 🧤 **ВРАТАРСКАЯ КАРТОЧКА** 🧤\n"
-            f"╚═══════════════════════╝\n\n"
-            f"👤 Игрок: **{name}**\n"
-            f"📍 Позиция: **{pos}**\n\n"
-            f"📊 **СТАТИСТИКА:**\n"
-            f"• Сейвы (🧤): **{total_saves}**\n"
-            f"• Пропущенные (🥅): **{total_conceded}**\n\n"
-            f"👟 Сыграно матчей: **{total_matches}**\n"
-            f"⏱️ Наиграно времени: **{total_hours:.1f} ч.**\n"
-            f"🏙️ Город: **Кокшетау**\n"
-            f"─────────────────────────"
-        )
+        s1_name, s1_val = "СЕЙВЫ", (ps or 0) + (bs or 0)
+        s2_name, s2_val = "ПРОПУЩЕНО", (pc or 0) + (bc or 0)
+        rank = "Страж ворот" if s1_val > 20 else "Новичок-вратарь"
     else:
-        total_goals = (pg or 0) + (bg or 0)
-        total_assists = (pa or 0) + (ba or 0)
-        impact = total_goals + total_assists
-        card_text = (
-            f"╔═══════════════════════╗\n"
-            f" ⚡ **ФУТБОЛЬНАЯ КАРТОЧКА** ⚡\n"
-            f"╚═══════════════════════╝\n\n"
-            f"👤 Игрок: **{name}**\n"
-            f"📍 Позиция: **{pos}**\n\n"
-            f"📊 **СТАТИСТИКА (Г + П):**\n"
-            f"• Голы (⚽): **{total_goals}**\n"
-            f"• Ассисты (🤝): **{total_assists}**\n"
-            f"• Общий импакт: **{impact} очков**\n\n"
-            f"👟 Сыграно матчей: **{total_matches}**\n"
-            f"⏱️ Наиграно времени: **{total_hours:.1f} ч.**\n"
-            f"🏙️ Город: **Кокшетау**\n"
-            f"─────────────────────────"
-        )
+        goals = (pg or 0) + (bg or 0)
+        assists = (pa or 0) + (ba or 0)
+        s1_name, s1_val = "ГОЛЫ", goals
+        s2_name, s2_val = "АССИСТЫ", assists
+        impact = goals + assists
+        rank = "Легенда" if impact > 100 else ("Профессионал" if impact > 40 else "Новичок")
 
-    await message.answer(card_text, parse_mode="Markdown")
+    # Генерируем картинку карточки
+    photo_bio = generate_fifa_card(name, pos, rank, s1_name, s1_val, s2_name, s2_val, total_matches, total_hours)
+    
+    await message.answer_photo(
+        photo=types.BufferedInputFile(photo_bio.read(), filename="card.png"),
+        caption=f"🪪 Твоя официальная карточка игрока Кокшетау!",
+    )
 
 
 # --- ТАБЛИЦА ЛИДЕРОВ ---
@@ -508,14 +546,12 @@ async def challenge(message: types.Message):
         "Сделай 50 передач в стену правой ногой",
         "Сделай 50 передач в стену левой ногой",
         "Сделай 20 челночных рывков по 30 метров",
-        "Для вратарей: сделай 30 уверенных пойманий мяча после ударов слёту",
+        "Для вратарей: сделай 30 уверенных пойманий мяча",
     ]
-    await message.answer(
-        f"🎯 **Челлендж на сегодня:**\n\n👉 *{random.choice(ex)}*",
-        parse_mode="Markdown",
-    )
+    await message.answer(f"🎯 **Челлендж на сегодня:**\n\n👉 *{random.choice(ex)}*", parse_mode="Markdown")
 
 
+# --- УДАЛЕНИЕ МАТЧА ---
 @dp.message(F.text == "🗑️ Удалить матч")
 async def del_match(message: types.Message):
     user_id = message.from_user.id
@@ -541,10 +577,7 @@ async def del_match(message: types.Message):
         ]
         for r in rows
     ]
-    await message.answer(
-        "Выбери матч для удаления:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=btns),
-    )
+    await message.answer("Выбери матч для удаления:", reply_markup=InlineKeyboardMarkup(inline_keyboard=btns))
 
 
 @dp.callback_query(F.data.startswith("del_"))
@@ -552,21 +585,7 @@ async def remove_match(callback: types.CallbackQuery):
     m_id = int(callback.data.split("_")[1])
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM matches WHERE id = ? AND user_id = ?",
-        (m_id, callback.from_user.id),
-    )
+    cursor.execute("DELETE FROM matches WHERE id = ? AND user_id = ?", (m_id, callback.from_user.id))
     conn.commit()
     conn.close()
-    await callback.message.edit_text("🗑️ Матч удален!")
-    await callback.answer()
-
-
-async def main():
-    print("Bot started successfully")
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-                    
+    await call
