@@ -382,11 +382,10 @@ async def process_hours(message: types.Message, state: FSMContext):
     conn.close()
 
     await state.clear()
-    await message.answer(
-        f"✅ **Матч успешно сохранен!**\n⏱️ Время: {hours} ч.",
-        reply_markup=get_main_keyboard(user_id == ADMIN_ID),
-        parse_mode="Markdown",
-    )
+    
+    # Исправленный блок отправки без разрывов строк в скобках
+    text_msg = "✅ Матч успешно сохранен!\n⏱️ Время: " + str(hours) + " ч."
+    await message.answer(text_msg, reply_markup=get_main_keyboard(user_id == ADMIN_ID))
 
 
 # --- ГЕНЕРАЦИЯ КАРТОЧКИ FIFA (КАРТИНКА) ---
@@ -591,7 +590,4 @@ async def admin_panel(message: types.Message):
     users_count = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(id) FROM matches")
     matches_count = cursor.fetchone()[0]
-    conn.close()
-
-    await message.answer(
-  
+   
