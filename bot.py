@@ -1,5 +1,5 @@
 import asyncio
-import datetime
+from datetime import datetime
 import logging
 import os
 import random
@@ -33,13 +33,17 @@ dp = Dispatcher()
 def init_db():
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
+    # Добавили поля для вратарей: saves (сейвы) и conceded (пропущенные)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS matches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             username TEXT,
             date TEXT,
-            goals INTEGER,
+            goals INTEGER DEFAULT 0,
+            assists INTEGER DEFAULT 0,
+            saves INTEGER DEFAULT 0,
+            conceded INTEGER DEFAULT 0,
             hours REAL
         )
     """)
@@ -49,6 +53,9 @@ def init_db():
             username TEXT,
             position TEXT,
             past_goals INTEGER DEFAULT 0,
+            past_assists INTEGER DEFAULT 0,
+            past_saves INTEGER DEFAULT 0,
+            past_conceded INTEGER DEFAULT 0,
             past_matches INTEGER DEFAULT 0,
             past_hours REAL DEFAULT 0.0
         )
@@ -61,12 +68,14 @@ init_db()
 
 
 class GameForm(StatesGroup):
-    waiting_for_goals = State()
+    waiting_for_stat1 = State()  # Голы для полевых / Сейвы для вратаря
+    waiting_for_stat2 = State()  # Ассисты для полевых / Пропущенные для вратаря
     waiting_for_hours = State()
 
 
 class PastStatsForm(StatesGroup):
-    waiting_for_past_goals = State()
+    waiting_for_past_stat1 = State()
+    waiting_for_past_stat2 = State()
     waiting_for_past_matches = State()
     waiting_for_past_hours = State()
 
@@ -76,21 +85,20 @@ def get_main_keyboard():
         keyboard=[
             [
                 KeyboardButton(text="⚽ Записать матч"),
-                KeyboardButton(text="📜 Добавить прошлые голы"),
+                KeyboardButton(text="📜 Добавить прошлую статистику"),
             ],
             [
-                KeyboardButton(text="📊 Моя статистика"),
+                KeyboardButton(text="🪪 Карточка игрока"),
                 KeyboardButton(text="👤 Выбрать позицию"),
             ],
             [
                 KeyboardButton(text="🏆 Таблица лидеров"),
-                KeyboardButton(text="🎖️ Мои достижения"),
+                KeyboardButton(text="🎯 Челлендж дня"),
             ],
             [
-                KeyboardButton(text="🎯 Челлендж дня"),
                 KeyboardButton(text="🗑️ Удалить матч"),
+                KeyboardButton(text="🌍 Статистика сообщества"),
             ],
-            [KeyboardButton(text="🌍 Статистика сообщества")],
         ],
         resize_keyboard=True,
     )
@@ -115,10 +123,9 @@ async def cmd_start(message: types.Message):
     conn.close()
 
     await message.answer(
-        f"Привет, {message.from_user.first_name}!\n\n"
-        "Твой личный футбольный трекер готов к работе. Фиксируй матчи, добавляй прошлые заслуги, "
-        "выбирай позицию на поле и соревнуйся в топах!\n\n"
-        "Выбирай нужное действие в меню ниже:",
+        f"Привет, {message.from_user.first_name}! ⚽🔥\n\n"
+        "Футбольный трекер Кокшетау готов! Полевые игроки считают голы и ассисты, а вратари — сейвы и пропущенные.\n\n"
+        "Выбирай действие в меню:",
         reply_markup=get_main_keyboard(),
     )
 
@@ -166,26 +173,53 @@ async def process_position(callback: types.CallbackQuery):
     conn.commit()
     conn.close()
 
-    await callback.message.edit_text(f"Позиция успешно обновлена: {position}!")
+    await callback.message.edit_text(f"Позиция успешно обновлена: {position}! ⚡")
     await callback.answer()
 
 
-@dp.message(F.text == "📜 Добавить прошлые голы")
+# --- ДОБАВЛЕНИЕ ПРОШЛОЙ СТАТИСТИКИ ---
+@dp.message(F.text == "📜 Добавить прошлую статистику")
 async def start_past_stats(message: types.Message, state: FSMContext):
-    await state.set_state(PastStatsForm.waiting_for_past_goals)
-    await message.answer(
-        "Сколько всего голов ты забил до того, как пришел в бота? (Введите общую сумму цифрой):"
-    )
+    user_id = message.from_user.id
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT position FROM profiles WHERE user_id = ?", (user_id,))
+    res = cursor.fetchone()
+    conn.close()
+
+    pos = res[0] if res else "Не указана"
+    await state.update_data(position=pos)
+    await state.set_state(PastStatsForm.waiting_for_past_stat1)
+
+    if pos == "Вратарь":
+        await message.answer("📜 **Прошлые заслуги**\n\nСколько всего **сейвов** ты сделал до этого?")
+    else:
+        await message.answer("📜 **Прошлые заслуги**\n\nСколько всего **голов** ты забил до этого?")
 
 
-@dp.message(PastStatsForm.waiting_for_past_goals)
-async def process_past_goals(message: types.Message, state: FSMContext):
+@dp.message(PastStatsForm.waiting_for_past_stat1)
+async def process_past_stat1(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("Пожалуйста, введи целое число (например: 150):")
+        await message.answer("Введи целое число:")
         return
-    await state.update_data(past_goals=int(message.text))
+    await state.update_data(val1=int(message.text))
+    data = await state.get_data()
+
+    await state.set_state(PastStatsForm.waiting_for_past_stat2)
+    if data["position"] == "Вратарь":
+        await message.answer("🥅 Сколько всего мячей ты **пропустил** до этого?")
+    else:
+        await message.answer("🤝 Сколько всего **ассистов** отдал до этого?")
+
+
+@dp.message(PastStatsForm.waiting_for_past_stat2)
+async def process_past_stat2(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Введи целое число:")
+        return
+    await state.update_data(val2=int(message.text))
     await state.set_state(PastStatsForm.waiting_for_past_matches)
-    await message.answer("А сколько примерно матчей ты сыграл до этого?")
+    await message.answer("👟 Сколько примерно матчей сыграл до этого?")
 
 
 @dp.message(PastStatsForm.waiting_for_past_matches)
@@ -195,7 +229,7 @@ async def process_past_matches(message: types.Message, state: FSMContext):
         return
     await state.update_data(past_matches=int(message.text))
     await state.set_state(PastStatsForm.waiting_for_past_hours)
-    await message.answer("И сколько примерно часов провел на поле в прошлых матчах?")
+    await message.answer("⏱️ Сколько примерно часов провел на поле суммарно?")
 
 
 @dp.message(PastStatsForm.waiting_for_past_hours)
@@ -207,7 +241,8 @@ async def process_past_hours(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    pg, pm = data["past_goals"], data["past_matches"]
+    v1, v2, pm = data["val1"], data["val2"], data["past_matches"]
+    pos = data["position"]
     user_id = message.from_user.id
     username = (
         message.from_user.username
@@ -217,54 +252,78 @@ async def process_past_hours(message: types.Message, state: FSMContext):
 
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO profiles (user_id, username, position, past_goals, past_matches, past_hours) 
-        VALUES (?, ?, 'Не указана', ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET 
-        past_goals = ?, past_matches = ?, past_hours = ?, username = ?
-    """,
-        (user_id, username, pg, pm, past_hours, pg, pm, past_hours, username),
-    )
+
+    if pos == "Вратарь":
+        cursor.execute(
+            """
+            INSERT INTO profiles (user_id, username, position, past_saves, past_conceded, past_matches, past_hours) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET 
+            past_saves = ?, past_conceded = ?, past_matches = ?, past_hours = ?, username = ?
+        """,
+            (user_id, username, pos, v1, v2, pm, past_hours, v1, v2, pm, past_hours, username),
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO profiles (user_id, username, position, past_goals, past_assists, past_matches, past_hours) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET 
+            past_goals = ?, past_assists = ?, past_matches = ?, past_hours = ?, username = ?
+        """,
+            (user_id, username, pos, v1, v2, pm, past_hours, v1, v2, pm, past_hours, username),
+        )
+
     conn.commit()
     conn.close()
 
     await state.clear()
-    await message.answer(
-        f"Прошлые данные сохранены!\nГолы: {pg}\nМатчи: {pm}\nЧасы: {past_hours:.1f}",
-        reply_markup=get_main_keyboard(),
-    )
+    await message.answer("✅ Прошлые данные успешно сохранены!", reply_markup=get_main_keyboard())
 
 
-def get_user_rank(g):
-    if g >= 300:
-        return "Легенда поля"
-    elif g >= 150:
-        return "Звезда футбола"
-    elif g >= 70:
-        return "Профессионал"
-    elif g >= 30:
-        return "Уверенный игрок"
-    elif g >= 10:
-        return "Прогрессирующий"
-    else:
-        return "Новичок"
-
-
+# --- ЗАПИСЬ НОВОГО МАТЧА ---
 @dp.message(F.text == "⚽ Записать матч")
 async def start_add_game(message: types.Message, state: FSMContext):
-    await state.set_state(GameForm.waiting_for_goals)
-    await message.answer("Сколько голов ты забил сегодня?")
+    user_id = message.from_user.id
+    conn = sqlite3.connect("football_bot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT position FROM profiles WHERE user_id = ?", (user_id,))
+    res = cursor.fetchone()
+    conn.close()
+
+    pos = res[0] if res else "Не указана"
+    await state.update_data(position=pos)
+    await state.set_state(GameForm.waiting_for_stat1)
+
+    if pos == "Вратарь":
+        await message.answer("🧤 Сколько **сейвов** ты сделал в этом матче?")
+    else:
+        await message.answer("⚽ Сколько **голов** ты забил в этом матче?")
 
 
-@dp.message(GameForm.waiting_for_goals)
-async def process_goals(message: types.Message, state: FSMContext):
+@dp.message(GameForm.waiting_for_stat1)
+async def process_stat1(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Введи целое число:")
         return
-    await state.update_data(goals=int(message.text))
+    await state.update_data(val1=int(message.text))
+    data = await state.get_data()
+
+    await state.set_state(GameForm.waiting_for_stat2)
+    if data["position"] == "Вратарь":
+        await message.answer("🥅 Сколько мячей ты **пропустил** в этом матче?")
+    else:
+        await message.answer("🤝 Сколько **ассистов** отдал?")
+
+
+@dp.message(GameForm.waiting_for_stat2)
+async def process_stat2(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Введи целое число:")
+        return
+    await state.update_data(val2=int(message.text))
     await state.set_state(GameForm.waiting_for_hours)
-    await message.answer("Сколько часов длился матч или тренировка?")
+    await message.answer("⏱️ Сколько часов длился матч/тренировка?")
 
 
 @dp.message(GameForm.waiting_for_hours)
@@ -276,8 +335,9 @@ async def process_hours(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    goals = data["goals"]
-    today = datetime.datetime.now().strftime("%d.%m.%Y")
+    v1, v2 = data["val1"], data["val2"]
+    pos = data["position"]
+    today = datetime.now().strftime("%d.%m.%Y")
     user_id = message.from_user.id
     username = (
         message.from_user.username
@@ -287,74 +347,115 @@ async def process_hours(message: types.Message, state: FSMContext):
 
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO matches (user_id, username, date, goals, hours) VALUES (?, ?, ?, ?, ?)",
-        (user_id, username, today, goals, hours),
-    )
+
+    if pos == "Вратарь":
+        cursor.execute(
+            "INSERT INTO matches (user_id, username, date, saves, conceded, hours) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, username, today, v1, v2, hours),
+        )
+    else:
+        cursor.execute(
+            "INSERT INTO matches (user_id, username, date, goals, assists, hours) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, username, today, v1, v2, hours),
+        )
+
     cursor.execute(
         "INSERT OR IGNORE INTO profiles (user_id, username, position) VALUES (?, ?, ?)",
-        (user_id, username, "Не указана"),
+        (user_id, username, pos),
     )
     conn.commit()
     conn.close()
 
     await state.clear()
-    await message.answer(
-        f"Матч успешно сохранен!\nДата: {today}\nГолы: {goals}\nВремя: {hours} ч.",
-        reply_markup=get_main_keyboard(),
-    )
+    if pos == "Вратарь":
+        text = f"✅ **Матч сохранен!**\n🧤 Сейвы: {v1}\n🥅 Пропущено: {v2}\n⏱️ Время: {hours} ч."
+    else:
+        text = f"✅ **Матч сохранен!**\n⚽ Голы: {v1}\n🤝 Ассисты: {v2}\n⏱️ Время: {hours} ч."
+
+    await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
 
 
-@dp.message(F.text == "📊 Моя статистика")
-async def show_stats(message: types.Message):
+# --- КАРТОЧКА ИГРОКА ---
+@dp.message(F.text == "🪪 Карточка игрока")
+async def show_player_card(message: types.Message):
     user_id = message.from_user.id
+    name = message.from_user.first_name
+
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT position, past_goals, past_matches, past_hours FROM profiles WHERE user_id = ?",
+        "SELECT position, past_goals, past_assists, past_saves, past_conceded, past_matches, past_hours FROM profiles WHERE user_id = ?",
         (user_id,),
     )
     prof = cursor.fetchone()
+    
     cursor.execute(
-        "SELECT SUM(goals), SUM(hours), COUNT(id) FROM matches WHERE user_id = ?",
+        "SELECT SUM(goals), SUM(assists), SUM(saves), SUM(conceded), SUM(hours), COUNT(id) FROM matches WHERE user_id = ?",
         (user_id,),
     )
     m_data = cursor.fetchone()
     conn.close()
 
     pos = prof[0] if prof and prof[0] else "Не указана"
-    pg, pm, ph = (
-        (prof[1], prof[2], prof[3]) if prof else (0, 0, 0.0)
-    )
-    bg, bh, bm = (
-        (m_data[0], m_data[1], m_data[2]) if m_data else (0, 0.0, 0)
-    )
+    pg, pa, ps, pc, pm, ph = (prof[1], prof[2], prof[3], prof[4], prof[5], prof[6]) if prof else (0, 0, 0, 0, 0, 0.0)
+    bg, ba, bs, bc, bh, bm = (m_data[0], m_data[1], m_data[2], m_data[3], m_data[4], m_data[5]) if m_data and m_data[4] is not None else (0, 0, 0, 0, 0.0, 0)
 
-    total_g = (pg or 0) + (bg or 0)
-    total_m = (pm or 0) + (bm or 0)
-    total_h = (ph or 0.0) + (bh or 0.0)
-    rank = get_user_rank(total_g)
+    total_matches = (pm or 0) + (bm or 0)
+    total_hours = (ph or 0.0) + (bh or 0.0)
 
-    await message.answer(
-        f"ТВОЯ СТАТИСТИКА:\n\n"
-        f"Позиция: {pos}\n"
-        f"Ранг: {rank}\n"
-        f"Всего игр: {total_m}\n"
-        f"Всего голов: {total_g}\n"
-        f"Наиграно: {total_h:.1f} ч."
-    )
+    if pos == "Вратарь":
+        total_saves = (ps or 0) + (bs or 0)
+        total_conceded = (pc or 0) + (bc or 0)
+        card_text = (
+            f"╔═══════════════════════╗\n"
+            f" 🧤 **ВРАТАРСКАЯ КАРТОЧКА** 🧤\n"
+            f"╚═══════════════════════╝\n\n"
+            f"👤 Игрок: **{name}**\n"
+            f"📍 Позиция: **{pos}**\n\n"
+            f"📊 **СТАТИСТИКА:**\n"
+            f"• Сейвы (🧤): **{total_saves}**\n"
+            f"• Пропущенные (🥅): **{total_conceded}**\n\n"
+            f"👟 Сыграно матчей: **{total_matches}**\n"
+            f"⏱️ Наиграно времени: **{total_hours:.1f} ч.**\n"
+            f"🏙️ Город: **Кокшетау**\n"
+            f"─────────────────────────"
+        )
+    else:
+        total_goals = (pg or 0) + (bg or 0)
+        total_assists = (pa or 0) + (ba or 0)
+        impact = total_goals + total_assists
+        card_text = (
+            f"╔═══════════════════════╗\n"
+            f" ⚡ **ФУТБОЛЬНАЯ КАРТОЧКА** ⚡\n"
+            f"╚═══════════════════════╝\n\n"
+            f"👤 Игрок: **{name}**\n"
+            f"📍 Позиция: **{pos}**\n\n"
+            f"📊 **СТАТИСТИКА (Г + П):**\n"
+            f"• Голы (⚽): **{total_goals}**\n"
+            f"• Ассисты (🤝): **{total_assists}**\n"
+            f"• Общий импакт: **{impact} очков**\n\n"
+            f"👟 Сыграно матчей: **{total_matches}**\n"
+            f"⏱️ Наиграно времени: **{total_hours:.1f} ч.**\n"
+            f"🏙️ Город: **Кокшетау**\n"
+            f"─────────────────────────"
+        )
+
+    await message.answer(card_text, parse_mode="Markdown")
 
 
+# --- ТАБЛИЦА ЛИДЕРОВ ---
 @dp.message(F.text == "🏆 Таблица лидеров")
 async def show_leaderboard(message: types.Message):
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT p.username, 
-               COALESCE(p.past_goals, 0) + COALESCE(SUM(m.goals), 0) as tg
+        SELECT p.username, p.position,
+               (COALESCE(p.past_goals, 0) + COALESCE(p.past_assists, 0) + 
+                COALESCE(SUM(m.goals), 0) + COALESCE(SUM(m.assists), 0)) as impact,
+               (COALESCE(p.past_saves, 0) + COALESCE(SUM(m.saves), 0)) as saves
         FROM profiles p
         LEFT JOIN matches m ON p.user_id = m.user_id
-        GROUP BY p.user_id ORDER BY tg DESC LIMIT 10
+        GROUP BY p.user_id ORDER BY impact DESC, saves DESC LIMIT 10
     """)
     rows = cursor.fetchall()
     conn.close()
@@ -363,33 +464,41 @@ async def show_leaderboard(message: types.Message):
         await message.answer("Пока нет игроков в топе.")
         return
 
-    text = "ТОП-10 ИГРОКОВ:\n\n"
+    text = "🏆 **ТОП-10 ИГРОКОВ КОКШЕТАУ:**\n\n"
     for i, r in enumerate(rows):
-        text += f"{i+1}. {r[0]} — {r[1]} голов\n"
-    await message.answer(text)
+        uname, position, imp, sav = r
+        if position == "Вратарь":
+            text += f"{i+1}. 🧤 **{uname}** — **{sav}** сейвов (Вратарь)\n"
+        else:
+            text += f"{i+1}. ⚽ **{uname}** — **{imp}** очков Г+П ({position})\n"
+
+    await message.answer(text, parse_mode="Markdown")
 
 
 @dp.message(F.text == "🌍 Статистика сообщества")
 async def show_global(message: types.Message):
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT SUM(past_goals), SUM(past_matches), SUM(past_hours) FROM profiles"
-    )
-    pg, pm, ph = cursor.fetchone()
-    cursor.execute("SELECT SUM(goals), COUNT(id), SUM(hours) FROM matches")
-    bg, bm, bh = cursor.fetchone()
+    cursor.execute("SELECT SUM(past_goals), SUM(past_assists), SUM(past_saves), SUM(past_matches), SUM(past_hours) FROM profiles")
+    pg, pa, ps, pm, ph = cursor.fetchone()
+    cursor.execute("SELECT SUM(goals), SUM(assists), SUM(saves), COUNT(id), SUM(hours) FROM matches")
+    bg, ba, bs, bm, bh = cursor.fetchone()
     conn.close()
 
     tg = (pg or 0) + (bg or 0)
+    ta = (pa or 0) + (ba or 0)
+    ts = (ps or 0) + (bs or 0)
     tm = (pm or 0) + (bm or 0)
     th = (ph or 0.0) + (bh or 0.0)
 
     await message.answer(
-        f"СТАТИСТИКА СООБЩЕСТВА:\n\n"
-        f"Всего голов: {tg}\n"
-        f"Всего матчей: {tm}\n"
-        f"Всего часов: {th:.1f}"
+        f"🌍 **СТАТИСТИКА СООБЩЕСТВА КОКШЕТАУ:**\n\n"
+        f"⚽ Всего голов: **{tg}**\n"
+        f"🤝 Всего ассистов: **{ta}**\n"
+        f"🧤 Всего сейвов: **{ts}**\n"
+        f"👟 Всего матчей: **{tm}**\n"
+        f"⏱️ Всего часов на поле: **{th:.1f} ч.**",
+        parse_mode="Markdown",
     )
 
 
@@ -398,9 +507,13 @@ async def challenge(message: types.Message):
     ex = [
         "Сделай 50 передач в стену правой ногой",
         "Сделай 50 передач в стену левой ногой",
-        "Сделай 20 рывков по 30 метров",
+        "Сделай 20 челночных рывков по 30 метров",
+        "Для вратарей: сделай 30 уверенных пойманий мяча после ударов слёту",
     ]
-    await message.answer(f"Челлендж на сегодня:\n\n{random.choice(ex)}")
+    await message.answer(
+        f"🎯 **Челлендж на сегодня:**\n\n👉 *{random.choice(ex)}*",
+        parse_mode="Markdown",
+    )
 
 
 @dp.message(F.text == "🗑️ Удалить матч")
@@ -409,7 +522,7 @@ async def del_match(message: types.Message):
     conn = sqlite3.connect("football_bot.db")
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, date, goals FROM matches WHERE user_id = ? ORDER BY id DESC LIMIT 5",
+        "SELECT id, date, goals, assists, saves FROM matches WHERE user_id = ? ORDER BY id DESC LIMIT 5",
         (user_id,),
     )
     rows = cursor.fetchall()
@@ -422,7 +535,7 @@ async def del_match(message: types.Message):
     btns = [
         [
             InlineKeyboardButton(
-                text=f"Удалить матч от {r[1]} (голов: {r[2]})",
+                text=f"❌ [{r[1]}] Г:{r[2]} П:{r[3]} Сейвов:{r[4]}",
                 callback_data=f"del_{r[0]}",
             )
         ]
@@ -445,15 +558,15 @@ async def remove_match(callback: types.CallbackQuery):
     )
     conn.commit()
     conn.close()
-    await callback.message.edit_text("Матч удален!")
+    await callback.message.edit_text("🗑️ Матч удален!")
     await callback.answer()
 
 
 async def main():
-    print("Bot started")
+    print("Bot started successfully")
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+                    
